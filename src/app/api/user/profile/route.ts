@@ -1,25 +1,17 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/jwt';
-import { headers } from 'next/headers';
+import { getAuthSession } from '@/lib/auth';
 
 export async function GET(request: Request) {
     try {
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-        }
-
         const user = await db.user.findUnique({
-            where: { id: decoded.id },
+            where: { id: session.id },
             select: {
                 id: true,
                 name: true,
@@ -30,6 +22,7 @@ export async function GET(request: Request) {
                 biometricsEnabled: true,
                 appNotificationsEnabled: true,
                 preferredLanguage: true,
+                onboarded: true,
                 image: true
             }
         });
@@ -47,43 +40,43 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
     try {
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-        }
-
         const body = await request.json();
-        const { name, email, phone, image } = body;
+        const { name, email, phone, image, onboarded, preferredLanguage } = body;
+        console.log("Profile Update Attempt for user:", session.id, "Body:", body);
+
+        const updateData: any = {};
+        if (name !== undefined) updateData.name = name;
+        if (email !== undefined) updateData.email = email;
+        if (phone !== undefined) updateData.phone = phone;
+        if (image !== undefined) updateData.image = image;
+        if (onboarded !== undefined) updateData.onboarded = onboarded;
+        if (preferredLanguage !== undefined) updateData.preferredLanguage = preferredLanguage;
 
         const updatedUser = await db.user.update({
-            where: { id: decoded.id },
-            data: {
-                name,
-                email,
-                phone,
-                image
-            },
+            where: { id: session.id },
+            data: updateData,
             select: {
                 id: true,
                 name: true,
                 email: true,
                 role: true,
                 phone: true,
-                image: true
+                image: true,
+                onboarded: true,
+                preferredLanguage: true
             }
         });
 
+        console.log("Profile Update Success");
         return NextResponse.json({ success: true, user: updatedUser });
     } catch (error) {
-        console.error("Profile Update API Error:", error);
+        console.error("Profile Update API Error Details:", error);
         return NextResponse.json({ error: 'Server error' }, { status: 500 });
     }
 }

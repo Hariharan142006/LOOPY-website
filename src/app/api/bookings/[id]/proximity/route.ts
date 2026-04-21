@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/jwt';
+import { getAuthSession } from '@/lib/auth';
 import { proximityAlertAction } from '@/app/actions';
-import { headers } from 'next/headers';
 
 export async function POST(
     request: Request,
@@ -9,14 +8,11 @@ export async function POST(
 ) {
     try {
         const { id } = await params;
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded || decoded.role !== 'AGENT') {
+        if (session.role !== 'AGENT') {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 

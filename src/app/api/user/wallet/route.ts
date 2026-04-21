@@ -1,25 +1,17 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyToken } from '@/lib/jwt';
-import { headers } from 'next/headers';
+import { getAuthSession } from '@/lib/auth';
 
 export async function GET() {
     try {
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-        }
-
         const user = await db.user.findUnique({
-            where: { id: decoded.id },
+            where: { id: session.id },
             select: {
                 walletBalance: true,
                 transactions: {
@@ -35,7 +27,7 @@ export async function GET() {
 
         // Calculate some simplified stats for the dashboard
         const totalKgRecycled = await db.bookingItem.aggregate({
-            where: { booking: { userId: decoded.id, status: 'COMPLETED' } },
+            where: { booking: { userId: session.id, status: 'COMPLETED' } },
             _sum: { quantity: true }
         });
 

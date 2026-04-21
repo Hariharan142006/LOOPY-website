@@ -11,7 +11,7 @@ import { useFonts, Poppins_400Regular, Poppins_500Medium, Poppins_600SemiBold, P
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -36,11 +36,16 @@ function RootLayoutNav() {
     if (isAuthLoading || !fontsLoaded) return;
 
     const inAuthGroup = segments[0] === 'login' || segments[0] === 'signup';
+    const inOnboardingGroup = segments[0] === 'onboarding';
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/login');
-    } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(tabs)');
+    } else if (isAuthenticated) {
+      if (!user?.onboarded && !inOnboardingGroup) {
+        router.replace('/onboarding/details');
+      } else if (user?.onboarded && (inAuthGroup || inOnboardingGroup)) {
+        router.replace('/(tabs)');
+      }
     }
   }, [isAuthenticated, segments, router, isAuthLoading, fontsLoaded]);
 
@@ -52,18 +57,23 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="login" />
       <Stack.Screen name="signup" />
+      <Stack.Screen name="onboarding" />
       <Stack.Screen name="(tabs)" />
     </Stack>
   );
 }
 
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <ThemeProvider value={DefaultTheme}>
-        <RootLayoutNav />
-        <StatusBar style="dark" />
-      </ThemeProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <ThemeProvider value={DefaultTheme}>
+          <RootLayoutNav />
+          <StatusBar style="dark" />
+        </ThemeProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

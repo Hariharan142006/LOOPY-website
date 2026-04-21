@@ -1,39 +1,34 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { headers } from 'next/headers';
-import { verifyToken } from '@/lib/jwt';
+import { getAuthSession } from '@/lib/auth';
+import bcrypt from 'bcryptjs';
 
 export async function POST(request: Request) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const session = await getAuthSession();
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || !decoded.id) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+        if (!session) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const { currentPassword, newPassword } = await request.json();
 
-        const user = await db.user.findUnique({ where: { id: decoded.id } });
+        const user = await db.user.findUnique({ where: { id: session.id } });
 
         if (!user) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        if (user.password !== currentPassword) {
+        const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isPasswordValid) {
             return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 });
         }
 
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
         await db.user.update({
-            where: { id: decoded.id },
-            data: { password: newPassword }
+            where: { id: session.id },
+            data: { password: hashedNewPassword }
         });
 
         return NextResponse.json({ message: 'Password updated successfully' });

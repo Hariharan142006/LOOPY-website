@@ -2,6 +2,10 @@
 
 import { db } from '@/lib/db';
 import { AuthUser } from '@/lib/types';
+import bcrypt from 'bcryptjs';
+import { cookies } from 'next/headers';
+import { signToken } from '@/lib/jwt';
+import { getAuthSession, isAdmin, isAgent } from '@/lib/auth';
 
 export async function loginAction(email: string, password: string): Promise<{ user: AuthUser | null; error?: string }> {
     try {
@@ -13,7 +17,26 @@ export async function loginAction(email: string, password: string): Promise<{ us
             return { user: null, error: 'User not found' };
         }
 
-        if (user.password !== password) {
+        let isPasswordValid = false;
+        try {
+            isPasswordValid = await bcrypt.compare(password, user.password);
+        } catch (e) {
+            // bcrypt.compare might throw if user.password is not a valid hash
+            isPasswordValid = false;
+        }
+        
+        // Legacy Support: If bcrypt fails, check if the password in DB is plaintext and matches exactly
+        if (!isPasswordValid && user.password === password) {
+            console.log(`[AUTH] Migrating legacy plaintext password for user: ${email}`);
+            const hashedPassword = await bcrypt.hash(password, 10);
+            await db.user.update({
+                where: { id: user.id },
+                data: { password: hashedPassword }
+            });
+            isPasswordValid = true;
+        }
+
+        if (!isPasswordValid) {
             return { user: null, error: 'Invalid credentials' };
         }
 
@@ -22,9 +45,17 @@ export async function loginAction(email: string, password: string): Promise<{ us
             return { user: null, error: 'Account is blocked. Contact administrator.' };
         }
 
-        // Agents can now login to web as per request
+        // Generate JWT and set cookie for web
+        const token = signToken({ id: user.id, role: user.role });
+        const cookieStore = await cookies();
+        cookieStore.set('auth_token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 30, // 30 days
+            path: '/',
+        });
 
-        // In a real app, generate JWT here
         return {
             user: {
                 id: user.id,
@@ -39,8 +70,8 @@ export async function loginAction(email: string, password: string): Promise<{ us
             }
         };
     } catch (error) {
-        console.error(error);
-        return { user: null, error: 'Database error' };
+        console.error("[AUTH ERROR] loginAction failed:", error);
+        return { user: null, error: `Database error: ${error instanceof Error ? error.message : 'Unknown error'}` };
     }
 }
 
@@ -93,25 +124,25 @@ export async function getScrapItemsAction(): Promise<ScrapItemWithCategory[]> {
 
 // --- OTP Actions ---
 
-// Simple in-memory store for development (Not for production with serverless)
-const devOtpStore = new Map<string, string>();
-
 export async function sendOtpAction(contact: string, method: 'email' | 'phone'): Promise<{ success: boolean; error?: string }> {
     try {
         // Generate 6 digit code
         const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Store it
-        devOtpStore.set(contact, code);
+        // Store it in DB with 10 min expiry
+        await db.otp.create({
+            data: {
+                contact,
+                code,
+                expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+            }
+        });
 
         // LOG IT for the user to see in terminal
         console.log(`\n==================================================`);
         console.log(`[OTP SERVICE] Sent to ${contact} via ${method}`);
         console.log(`CODE: ${code}`);
         console.log(`==================================================\n`);
-
-        // Simulate Network Delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
         return { success: true };
     } catch (error) {
@@ -126,18 +157,22 @@ export async function verifyOtpAction(contact: string, code: string): Promise<{ 
         return { success: true };
     }
 
-    // 2. Check Store
-    const storedCode = devOtpStore.get(contact);
-    if (!storedCode) {
-        return { success: false, error: "OTP expired or not found" };
-    }
+    // 2. Check DB
+    const otp = await db.otp.findFirst({
+        where: {
+            contact,
+            code,
+            expiresAt: { gt: new Date() }
+        },
+        orderBy: { createdAt: 'desc' }
+    });
 
-    if (storedCode !== code) {
-        return { success: false, error: "Invalid OTP code" };
+    if (!otp) {
+        return { success: false, error: "Invalid or expired OTP" };
     }
 
     // Clear after success
-    devOtpStore.delete(contact);
+    await db.otp.deleteMany({ where: { contact } });
     return { success: true };
 }
 
@@ -157,13 +192,15 @@ export async function registerUserAction(data: { name: string; email: string; ph
             return { success: false, error: "User with this email or phone already exists" };
         }
 
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+
         // Create
         const newUser = await db.user.create({
             data: {
                 name: data.name,
                 email: data.email,
                 phone: data.phone,
-                password: data.password, // Note: In prod, hash this!
+                password: hashedPassword,
                 role: 'CUSTOMER',
                 status: 'ACTIVE'
             }
@@ -189,6 +226,7 @@ export async function registerUserAction(data: { name: string; email: string; ph
 // --- Agent Management Actions ---
 
 export async function createAgentAction(data: { name: string; email: string; phone: string; password: string; vehicleName?: string; vehiclePlate?: string; vehicleType?: string; capacityKg?: number }): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         // Check existing
         const existing = await db.user.findFirst({
@@ -204,12 +242,14 @@ export async function createAgentAction(data: { name: string; email: string; pho
             return { success: false, error: "User with this email or phone already exists" };
         }
 
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+
         const newUser = await db.user.create({
             data: {
                 name: data.name,
                 email: data.email,
                 phone: data.phone,
-                password: data.password,
+                password: hashedPassword,
                 role: 'AGENT',
                 isOnline: false,
                 status: 'ACTIVE'
@@ -257,6 +297,7 @@ export async function createAgentAction(data: { name: string; email: string; pho
 }
 
 export async function getAgentsAction(): Promise<AuthUser[]> {
+    if (!(await isAdmin())) return [];
     try {
         const agents = await db.user.findMany({
             where: {
@@ -314,6 +355,7 @@ export async function getAvailableFleetsAction() {
 }
 
 export async function updateAgentVehicleAction(agentId: string, fleetId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         // Unassign old fleets
         await db.fleetVehicle.updateMany({
@@ -347,6 +389,11 @@ export async function updateAgentVehicleAction(agentId: string, fleetId: string)
 }
 
 export async function updateAgentLocationAction(agentId: string, lat: number, lng: number): Promise<{ success: boolean; error?: string }> {
+    // Only agents themselves or admins can update location
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== agentId)) {
+        return { success: false, error: "Unauthorized" };
+    }
     try {
         await db.user.update({
             where: { id: agentId },
@@ -381,6 +428,7 @@ export async function toggleAgentOnlineAction(agentId: string, isOnline: boolean
 // --- User Management Actions ---
 
 export async function getUsersAction(): Promise<AuthUser[]> {
+    if (!(await isAdmin())) return [];
     try {
         const users = await db.user.findMany({
             orderBy: {
@@ -403,6 +451,7 @@ export async function getUsersAction(): Promise<AuthUser[]> {
 }
 
 export async function toggleUserStatusAction(userId: string, newStatus: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.user.update({
             where: { id: userId },
@@ -416,6 +465,7 @@ export async function toggleUserStatusAction(userId: string, newStatus: string):
 }
 
 export async function changeUserRoleAction(userId: string, newRole: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.user.update({
             where: { id: userId },
@@ -429,6 +479,7 @@ export async function changeUserRoleAction(userId: string, newRole: string): Pro
 }
 
 export async function deleteUserAction(userId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.user.delete({
             where: { id: userId }
@@ -482,6 +533,7 @@ export async function createCustomerAction(data: { name: string; email: string; 
 // Admin can add or remove item in Pricing Configuration
 
 export async function createScrapItemAction(data: { name: string; categoryId: string; basePrice: number; currentPrice: number; unit: string; image?: string }): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.scrapItem.create({
             data: {
@@ -501,6 +553,7 @@ export async function createScrapItemAction(data: { name: string; categoryId: st
 }
 
 export async function updateScrapItemAction(id: string, data: { name: string; categoryId: string; basePrice: number; currentPrice: number; unit: string; image?: string }): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.scrapItem.update({
             where: { id },
@@ -521,6 +574,7 @@ export async function updateScrapItemAction(id: string, data: { name: string; ca
 }
 
 export async function deleteScrapItemAction(itemId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.scrapItem.delete({
             where: { id: itemId }
@@ -543,6 +597,8 @@ export async function getCategoriesAction() {
 // ... existing code ...
 
 export async function getUserActiveBookingAction(userId: string) {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== userId)) return null;
     try {
         const booking = await db.booking.findFirst({
             where: {
@@ -569,6 +625,7 @@ export async function getUserActiveBookingAction(userId: string) {
 // --- Admin Booking Actions ---
 
 export async function assignAgentToBookingAction(bookingId: string, agentId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         // Concurrency Check: Ensure booking isn't already taken
         const booking = await db.booking.findUnique({
@@ -595,6 +652,7 @@ export async function assignAgentToBookingAction(bookingId: string, agentId: str
 }
 
 export async function updateBookingStatusAction(bookingId: string, status: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAgent())) return { success: false, error: "Unauthorized" };
     try {
         await db.booking.update({
             where: { id: bookingId },
@@ -608,6 +666,7 @@ export async function updateBookingStatusAction(bookingId: string, status: strin
 }
 
 export async function getAllBookingsAction() {
+    if (!(await isAgent())) return [];
     try {
         const bookings = await db.booking.findMany({
             include: {
@@ -685,6 +744,10 @@ async function findNearestAgent(lat: number, lng: number, maxDistanceKm: number 
 }
 
 export async function getAgentTasksAction(agentId: string, agentLat?: number, agentLng?: number) {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== agentId)) {
+        return { available: [], accepted: [], completed: [] };
+    }
     try {
         console.log(`[FORENSIC] getAgentTasksAction called for ID: "${agentId}"`);
         
@@ -803,6 +866,9 @@ export async function getAgentTasksAction(agentId: string, agentLat?: number, ag
 }
 
 export async function getBookingAgentLocationAction(bookingId: string) {
+    // Basic verification: user must be logged in to track their booking
+    const session = await getAuthSession();
+    if (!session) return null;
     try {
         const booking = await db.booking.findUnique({
             where: { id: bookingId },
@@ -853,6 +919,8 @@ export async function getBookingAgentLocationAction(bookingId: string) {
 }
 
 export async function getBookingByIdAction(bookingId: string) {
+    const session = await getAuthSession();
+    if (!session) return null;
     try {
         const booking = await db.booking.findUnique({
             where: { id: bookingId },
@@ -874,6 +942,10 @@ export async function getBookingByIdAction(bookingId: string) {
 }
 
 export async function createBookingAction(userId: string, data: { items: { id: string, qty: number }[], schedule: { date: string, time: string }, location: { lat: number, lng: number, address: string }, totalAmount: number, remarks?: string }): Promise<{ success: boolean; bookingId?: string; error?: string }> {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== userId)) {
+        return { success: false, error: "Unauthorized" };
+    }
     try {
         console.log(`[Booking] Creating booking for user ${userId}`);
         console.log(`[Booking] Schedule: ${data.schedule.date} at ${data.schedule.time}`);
@@ -961,6 +1033,10 @@ export async function createBookingAction(userId: string, data: { items: { id: s
 
 // NEW: Clear all user bookings (for customer history reset)
 export async function clearUserBookingsAction(userId: string): Promise<{ success: boolean; deletedCount?: number; error?: string }> {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== userId)) {
+        return { success: false, error: "Unauthorized" };
+    }
     try {
         console.log(`[Booking] Clearing all bookings for user ${userId}`);
 
@@ -990,7 +1066,14 @@ export async function clearUserBookingsAction(userId: string): Promise<{ success
 }
 
 export async function cancelBookingAction(bookingId: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getAuthSession();
+    if (!session) return { success: false, error: "Unauthorized" };
     try {
+        // If not admin, check if it's their booking
+        if (session.role !== 'ADMIN') {
+            const booking = await db.booking.findUnique({ where: { id: bookingId }, select: { userId: true } });
+            if (booking?.userId !== session.id) return { success: false, error: "Unauthorized" };
+        }
         await db.booking.update({
             where: { id: bookingId },
             data: { status: 'CANCELLED' }
@@ -1003,6 +1086,7 @@ export async function cancelBookingAction(bookingId: string): Promise<{ success:
 }
 
 export async function deleteBookingAction(bookingId: string): Promise<{ success: boolean; error?: string }> {
+    if (!(await isAdmin())) return { success: false, error: "Unauthorized" };
     try {
         await db.bookingItem.deleteMany({
             where: { bookingId: bookingId }
@@ -1024,6 +1108,8 @@ export async function deleteBookingAction(bookingId: string): Promise<{ success:
 }
 
 export async function getUserBookingsAction(userId: string) {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== userId)) return [];
     try {
         const bookings = await db.booking.findMany({
             where: { userId: userId },
@@ -1059,6 +1145,10 @@ export async function getUserBookingsAction(userId: string) {
 // --- Dashboard & Wallet --
 
 export async function getUserDashboardStatsAction(userId: string) {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== userId)) {
+        return { totalEarnings: 0, growthPercentage: 0, recentActivity: [] };
+    }
     try {
         const [user, bookings] = await Promise.all([
             db.user.findUnique({
@@ -1101,6 +1191,10 @@ export async function getUserDashboardStatsAction(userId: string) {
 }
 
 export async function withdrawFundsAction(userId: string, amount: number, method: string): Promise<{ success: boolean; error?: string }> {
+    const session = await getAuthSession();
+    if (!session || (session.role !== 'ADMIN' && session.id !== userId)) {
+        return { success: false, error: "Unauthorized" };
+    }
     try {
         // In a real app, this would check wallet balance, creating a transaction record, etc.
         // For now, we'll verify the user exists and "simulate" a success.
@@ -1121,6 +1215,7 @@ export async function withdrawFundsAction(userId: string, amount: number, method
 // --- Analytics Actions ---
 
 export async function getUserAnalyticsAction() {
+    if (!(await isAdmin())) return { newUsersToday: 0, activeUsers: 0, totalUsers: 0, repeatRate: 0, growthData: [] };
     try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -1218,6 +1313,7 @@ export async function getUserAnalyticsAction() {
 
 // Revenue Analytics
 export async function getRevenueAnalyticsAction() {
+    if (!(await isAdmin())) return { totalRevenue: 0, avgRevenue: 0, revenueTrend: [], revenueByCity: [] };
     try {
         const completedBookings = await db.booking.findMany({
             where: { status: 'COMPLETED' },
@@ -1524,12 +1620,13 @@ export async function payBookingAction(bookingId: string, data: { items: any[], 
             }
         });
 
-        // 3. Update Booking Status
+        // 3. Update Booking Status and Evidence
         await db.booking.update({
             where: { id: bookingId },
             data: {
                 status: 'COMPLETED',
-                totalAmount: amount
+                totalAmount: amount,
+                evidenceImages: data.photos || []
             }
         });
 

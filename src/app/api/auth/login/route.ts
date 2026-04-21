@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { signToken } from '@/lib/jwt';
+import bcrypt from 'bcryptjs';
 
 export async function POST(request: Request) {
     try {
@@ -9,7 +10,29 @@ export async function POST(request: Request) {
 
         const user = await db.user.findUnique({ where: { email } });
 
-        if (!user || user.password !== password) {
+        if (!user) {
+            return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+        }
+
+        let isPasswordValid = false;
+        try {
+            isPasswordValid = await bcrypt.compare(password, user.password);
+        } catch (e) {
+            isPasswordValid = false;
+        }
+
+        // Legacy Support: If bcrypt fails, check if input matches DB plaintext exactly
+        if (!isPasswordValid && user.password === password) {
+            console.log(`[AUTH-API] Migrating legacy plaintext password for user: ${email}`);
+            const hashedPassword = await bcrypt.hash(password, 10);
+            await db.user.update({
+                where: { id: user.id },
+                data: { password: hashedPassword }
+            });
+            isPasswordValid = true;
+        }
+
+        if (!isPasswordValid) {
             return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
         }
 

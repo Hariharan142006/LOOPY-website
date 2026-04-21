@@ -10,18 +10,10 @@ export async function GET(
     try {
         const { id } = await params;
         console.log(`[FORENSIC] Fetching Booking ID: ${id}`);
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
-            console.log(`[FORENSIC] No token provided for booking ${id}`);
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded) {
-            console.log(`[FORENSIC] Invalid token for booking ${id}`);
+        if (!session) {
+            console.log(`[FORENSIC] No session provided for booking ${id}`);
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 

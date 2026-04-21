@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/jwt';
+import { getAuthSession } from '@/lib/auth';
 import { getAgentTasksAction } from '@/app/actions';
-import { headers } from 'next/headers';
 import fs from 'fs';
 import path from 'path';
 
@@ -14,22 +13,19 @@ function auditLog(msg: string) {
 
 export async function GET(request: Request) {
     try {
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded || (decoded.role !== 'AGENT' && decoded.role !== 'ADMIN')) {
+        if (session.role !== 'AGENT' && session.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         // Default to no location for simple GET
-        console.log(`[ROUTE] GET /api/agent/tasks for ID: "${decoded.id}"`);
-        const result = await getAgentTasksAction(decoded.id);
+        console.log(`[ROUTE] GET /api/agent/tasks for ID: "${session.id}"`);
+        const result = await getAgentTasksAction(session.id);
 
         // Return structured data
         return NextResponse.json(result);
@@ -41,23 +37,20 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
     try {
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded || (decoded.role !== 'AGENT' && decoded.role !== 'ADMIN')) {
+        if (session.role !== 'AGENT' && session.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         const body = await request.json();
         const { lat, lng } = body;
 
-        const result = await getAgentTasksAction(decoded.id, lat, lng);
+        const result = await getAgentTasksAction(session.id, lat, lng);
         return NextResponse.json(result);
     } catch (error) {
         console.error("Agent Tasks POST Error:", error);

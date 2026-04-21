@@ -297,9 +297,17 @@ export default function AdminRatesPage() {
                                     </TableCell>
                                     <TableCell className="font-medium text-white">
                                         {item.name}
-                                        {item.currentPrice > item.basePrice && (
+                                        {item.currentPrice > item.basePrice ? (
                                             <Badge variant="outline" className="ml-2 border-green-500/50 text-green-400 text-[10px] h-5">
                                                 <ArrowUpRight className="h-3 w-3 mr-1" /> High Demand
+                                            </Badge>
+                                        ) : item.currentPrice < item.basePrice ? (
+                                            <Badge variant="outline" className="ml-2 border-red-500/50 text-red-400 text-[10px] h-5">
+                                                <ArrowDownRight className="h-3 w-3 mr-1" /> Surplus
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="outline" className="ml-2 border-gray-700 text-gray-400 text-[10px] h-5">
+                                                Stable
                                             </Badge>
                                         )}
                                     </TableCell>

@@ -1,14 +1,18 @@
 import jwt from 'jsonwebtoken';
 
-const SECRET_KEY = process.env.JWT_SECRET || 'fallback-secret-key-change-this-in-production';
+const getSecret = () => process.env.JWT_SECRET || 'development-secret-key-change-this-in-production';
+
+if (!process.env.JWT_SECRET) {
+    console.warn("WARNING: JWT_SECRET is not set in environment variables. Using development fallback.");
+}
 
 export function signToken(payload: any) {
-    return jwt.sign(payload, SECRET_KEY, { expiresIn: '30d' });
+    return jwt.sign(payload, getSecret(), { expiresIn: '30d' });
 }
 
 export function verifyToken(token: string) {
     try {
-        return jwt.verify(token, SECRET_KEY);
+        return jwt.verify(token, getSecret());
     } catch (e) {
         return null;
     }

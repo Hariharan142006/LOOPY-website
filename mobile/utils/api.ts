@@ -2,8 +2,9 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const DEV_URL = 'http://192.168.0.2:3000';
-export const API_URL = process.env.EXPO_PUBLIC_API_URL || DEV_URL;
+const PROD_URL = 'https://scrap-xi.vercel.app';
+const DEV_URL = 'http://10.43.119.120:3000';
+export const API_URL = PROD_URL; // Pointing to Vercel production backend
 
 export const api = axios.create({
   baseURL: API_URL,

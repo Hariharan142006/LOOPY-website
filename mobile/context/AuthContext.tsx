@@ -10,6 +10,7 @@ interface User {
   phone?: string;
   vehicleType?: string;
   preferredLanguage?: string;
+  onboarded?: boolean;
   appNotificationsEnabled?: boolean;
   biometricsEnabled?: boolean;
 }

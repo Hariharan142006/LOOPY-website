@@ -1,27 +1,18 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { headers } from 'next/headers';
-import { verifyToken } from '@/lib/jwt';
+import { getAuthSession } from '@/lib/auth';
 
 // Get user's tickets
 export async function GET(request: Request) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        const session = await getAuthSession();
+
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || !decoded.id) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-        }
-
         const tickets = await db.supportTicket.findMany({
-            where: decoded.role === 'ADMIN' ? {} : { userId: decoded.id },
+            where: session.role === 'ADMIN' ? {} : { userId: session.id },
             orderBy: { updatedAt: 'desc' },
             include: {
                 user: {
@@ -43,18 +34,10 @@ export async function GET(request: Request) {
 // Create new ticket
 export async function POST(request: Request) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const session = await getAuthSession();
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || !decoded.id) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+        if (!session) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const { subject, message } = await request.json();
@@ -65,11 +48,11 @@ export async function POST(request: Request) {
 
         const ticket = await db.supportTicket.create({
             data: {
-                userId: decoded.id,
+                userId: session.id,
                 subject,
                 messages: {
                     create: {
-                        senderId: decoded.id,
+                        senderId: session.id,
                         text: message,
                         isAdmin: false
                     }

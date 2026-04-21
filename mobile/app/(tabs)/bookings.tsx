@@ -235,9 +235,9 @@ const styles = StyleSheet.create({
   timelineRow: { flexDirection: 'row', paddingHorizontal: 24, marginBottom: 4 },
   timelineLeft: { width: 30, alignItems: 'center' },
   timelineLine: { position: 'absolute', top: 0, bottom: -10, width: 2, backgroundColor: '#e5e7eb' },
-  timelineDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#9ca3af', marginTop: 30, zIndex: 1, borderWidth: 2, borderColor: '#fcfcfc' },
-  timelineDotActive: { backgroundColor: '#bbf7d0', width: 24, height: 24, borderRadius: 12, marginTop: 24, marginLeft: 0 },
-  dotInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#22c55e' },
+  timelineDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#9ca3af', marginTop: 28, zIndex: 1, borderWidth: 3, borderColor: '#fcfcfc' },
+  timelineDotActive: { backgroundColor: '#bbf7d0', width: 24, height: 24, borderRadius: 12, marginTop: 23, marginLeft: -5 },
+  dotInner: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#22c55e' },
   
   // Cards
   cardContainer: { flex: 1 },

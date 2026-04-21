@@ -1,21 +1,12 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { headers } from 'next/headers';
-import { verifyToken } from '@/lib/jwt';
+import { getAuthSession } from '@/lib/auth';
 
 export async function GET(request: Request) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const session = await getAuthSession();
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || decoded.role !== 'ADMIN') {
+        if (!session || session.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
@@ -31,17 +22,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const session = await getAuthSession();
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || decoded.role !== 'ADMIN') {
+        if (!session || session.role !== 'ADMIN') {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 

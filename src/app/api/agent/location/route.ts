@@ -1,20 +1,16 @@
 import { NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/jwt';
-import { headers } from 'next/headers';
+import { getAuthSession } from '@/lib/auth';
 import { updateAgentLocationAction } from '@/app/actions';
 
 export async function POST(request: Request) {
     try {
-        const headerList = await headers();
-        const authorization = headerList.get('Authorization');
-        const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+        const session = await getAuthSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const decoded = verifyToken(token) as { id: string, role: string };
-        if (!decoded || decoded.role !== 'AGENT') {
+        if (session.role !== 'AGENT') {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
@@ -25,7 +21,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Coordinates required' }, { status: 400 });
         }
 
-        const result = await updateAgentLocationAction(decoded.id, lat, lng);
+        const result = await updateAgentLocationAction(session.id, lat, lng);
         
         if (!result.success) {
             return NextResponse.json({ error: result.error }, { status: 500 });

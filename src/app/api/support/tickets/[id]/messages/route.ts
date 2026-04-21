@@ -1,25 +1,16 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { headers } from 'next/headers';
-import { verifyToken } from '@/lib/jwt';
+import { getAuthSession } from '@/lib/auth';
 
 export async function GET(
     request: Request,
     { params }: { params: { id: string } }
 ) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const session = await getAuthSession();
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || !decoded.id) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+        if (!session) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const messages = await db.supportMessage.findMany({
@@ -32,7 +23,7 @@ export async function GET(
             where: { id: params.id }
         });
 
-        if (!ticket || (ticket.userId !== decoded.id && decoded.role !== 'ADMIN')) {
+        if (!ticket || (ticket.userId !== session.id && session.role !== 'ADMIN')) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
@@ -47,18 +38,10 @@ export async function POST(
     { params }: { params: { id: string } }
 ) {
     try {
-        const headerList = await headers();
-        const authHeader = headerList.get('authorization');
-        
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const session = await getAuthSession();
 
-        const token = authHeader.split(' ')[1];
-        const decoded = verifyToken(token) as any;
-        
-        if (!decoded || !decoded.id) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+        if (!session) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const { text } = await request.json();
@@ -67,12 +50,12 @@ export async function POST(
             return NextResponse.json({ error: 'Message text is required' }, { status: 400 });
         }
 
-        const isAdmin = decoded.role === 'ADMIN';
+        const isAdmin = session.role === 'ADMIN';
 
         const message = await db.supportMessage.create({
             data: {
                 ticketId: params.id,
-                senderId: decoded.id,
+                senderId: session.id,
                 text,
                 isAdmin: isAdmin
             }

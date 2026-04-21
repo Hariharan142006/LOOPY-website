@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
-import { MapPin, User, Phone, Calendar, Package, AlertTriangle } from "lucide-react";
+import { MapPin, User, Phone, Calendar, Package, AlertTriangle, Image as ImageIcon, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
 
 interface PickupDetailViewProps {
@@ -180,20 +180,67 @@ export function PickupDetailView({ isOpen, onClose, booking, onUpdate, onDelete,
                                 <div key={item.id} className="flex items-center gap-3 p-3 rounded bg-white/5 border border-white/5">
                                     <div className="flex-1">
                                         <p className="text-sm font-medium">{item.item.name}</p>
-                                        <p className="text-xs text-gray-500">{item.item.category?.name}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-xs text-gray-500">{item.item.category?.name}</p>
+                                            <Badge variant="outline" className="text-[10px] h-4 py-0 border-gray-700 text-gray-400">
+                                                ₹{item.priceAtBooking}/{item.item.unit}
+                                            </Badge>
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-2 w-[120px]">
                                         <Input
                                             type="number"
                                             value={item.quantity}
                                             onChange={(e) => handleItemQtyChange(item.id, e.target.value)}
-                                            className="h-8 bg-black/20 text-right"
+                                            className="h-8 bg-black/20 text-right border-white/10"
                                         />
                                         <span className="text-xs text-gray-500 w-8">{item.item.unit}</span>
                                     </div>
                                 </div>
                             ))}
                         </div>
+
+                        {/* Total Summary */}
+                        <div className="mt-4 p-4 rounded-xl bg-green-500/10 border border-green-500/20 flex justify-between items-center">
+                            <div>
+                                <p className="text-xs text-green-500 font-bold uppercase tracking-wider">Final Payout</p>
+                                <p className="text-2xl font-black text-white">₹{booking.totalAmount?.toFixed(2) || '0.00'}</p>
+                            </div>
+                            <CheckCircle2 className="h-8 w-8 text-green-500 opacity-50" />
+                        </div>
+                    </div>
+
+                    <Separator className="bg-white/10" />
+
+                    {/* Evidence Gallery */}
+                    <div className="space-y-4 pb-4">
+                        <h3 className="font-semibold text-gray-300 flex items-center gap-2">
+                            <ImageIcon className="h-4 w-4" /> Evidence & Audit Photos
+                        </h3>
+                        
+                        {booking.evidenceImages && booking.evidenceImages.length > 0 ? (
+                            <div className="grid grid-cols-3 gap-3">
+                                {booking.evidenceImages.map((img: string, idx: number) => (
+                                    <div key={idx} className="aspect-square rounded-xl bg-white/5 border border-white/10 overflow-hidden relative group">
+                                        <img 
+                                            src={img} 
+                                            alt={`Evidence ${idx + 1}`} 
+                                            className="w-full h-full object-cover transition-transform group-hover:scale-110"
+                                        />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                            <Button variant="ghost" size="sm" className="text-white text-xs" onClick={() => window.open(img, '_blank')}>
+                                                View Large
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="py-8 rounded-xl border border-dashed border-white/10 bg-white/5 flex flex-col items-center justify-center">
+                                <ImageIcon className="h-8 w-8 text-gray-600 mb-2" />
+                                <p className="text-xs text-gray-500 italic">No agent photos available for this pickup.</p>
+                            </div>
+                        )}
                     </div>
                 </div>
 

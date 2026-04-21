@@ -35,9 +35,17 @@ export default function AdminSupportPage() {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await res.json();
-            setTickets(data);
+            
+            if (res.ok && Array.isArray(data)) {
+                setTickets(data);
+            } else {
+                console.error("Fetch Tickets Error:", data);
+                setTickets([]);
+                if (data.error) toast.error(data.error);
+            }
         } catch (error) {
             toast.error("Failed to load tickets");
+            setTickets([]);
         } finally {
             setLoading(false);
         }
@@ -50,9 +58,17 @@ export default function AdminSupportPage() {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             const data = await res.json();
-            setMessages(data);
+            
+            if (res.ok && Array.isArray(data)) {
+                setMessages(data);
+            } else {
+                console.error("Messages Error", data);
+                setMessages([]);
+                if (data.error) toast.error(data.error);
+            }
         } catch (error) {
             console.error("Messages Error", error);
+            setMessages([]);
         }
     };
 
@@ -201,7 +217,7 @@ export default function AdminSupportPage() {
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50/30 custom-scrollbar">
-                            {messages.map((msg, i) => (
+                            {Array.isArray(messages) && messages.map((msg, i) => (
                                 <div key={i} className={`flex ${msg.isAdmin ? 'justify-end' : 'justify-start'}`}>
                                     <div className={`max-w-[80%] ${msg.isAdmin ? 'order-last text-right' : 'text-left'}`}>
                                         <div className={`inline-block p-4 rounded-2xl text-sm shadow-sm ${msg.isAdmin ? 'bg-green-600 text-white rounded-tr-none' : 'bg-white text-gray-800 rounded-tl-none border border-gray-100'}`}>
