@@ -12,7 +12,8 @@ import {
     Tag,
     DollarSign,
     ToggleLeft,
-    ToggleRight
+    ToggleRight,
+    Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 

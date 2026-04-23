@@ -2,9 +2,18 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 
-const SECRET_KEY = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'development-secret-key-change-this-in-production'
-);
+const getSecretKey = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error("JWT_SECRET environment variable is required in production");
+    }
+    return 'development-secret-key-for-local-testing-only';
+  }
+  return secret;
+};
+
+const SECRET_KEY = new TextEncoder().encode(getSecretKey());
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

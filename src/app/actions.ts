@@ -24,17 +24,6 @@ export async function loginAction(email: string, password: string): Promise<{ us
             // bcrypt.compare might throw if user.password is not a valid hash
             isPasswordValid = false;
         }
-        
-        // Legacy Support: If bcrypt fails, check if the password in DB is plaintext and matches exactly
-        if (!isPasswordValid && user.password === password) {
-            console.log(`[AUTH] Migrating legacy plaintext password for user: ${email}`);
-            const hashedPassword = await bcrypt.hash(password, 10);
-            await db.user.update({
-                where: { id: user.id },
-                data: { password: hashedPassword }
-            });
-            isPasswordValid = true;
-        }
 
         if (!isPasswordValid) {
             return { user: null, error: 'Invalid credentials' };
@@ -152,12 +141,7 @@ export async function sendOtpAction(contact: string, method: 'email' | 'phone'):
 }
 
 export async function verifyOtpAction(contact: string, code: string): Promise<{ success: boolean; error?: string }> {
-    // 1. Check Master Code (for easy testing)
-    if (code === '123456') {
-        return { success: true };
-    }
-
-    // 2. Check DB
+    // 1. Check DB
     const otp = await db.otp.findFirst({
         where: {
             contact,
@@ -507,13 +491,15 @@ export async function createCustomerAction(data: { name: string; email: string; 
             return { success: false, error: "User with this email or phone already exists" };
         }
 
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+
         // Create CUSTOMER
         await db.user.create({
             data: {
                 name: data.name,
                 email: data.email,
                 phone: data.phone,
-                password: data.password,
+                password: hashedPassword,
                 role: 'CUSTOMER',
                 status: 'ACTIVE'
             }
