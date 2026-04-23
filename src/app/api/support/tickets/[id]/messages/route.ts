@@ -4,9 +4,10 @@ import { getAuthSession } from '@/lib/auth';
 
 export async function GET(
     request: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const { id } = await params;
         const session = await getAuthSession();
 
         if (!session) {
@@ -14,13 +15,13 @@ export async function GET(
         }
 
         const messages = await db.supportMessage.findMany({
-            where: { ticketId: params.id },
+            where: { ticketId: id },
             orderBy: { createdAt: 'asc' }
         });
 
         // Verify user owns the ticket or is admin
         const ticket = await db.supportTicket.findUnique({
-            where: { id: params.id }
+            where: { id }
         });
 
         if (!ticket || (ticket.userId !== session.id && session.role !== 'ADMIN')) {
@@ -35,9 +36,10 @@ export async function GET(
 
 export async function POST(
     request: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const { id } = await params;
         const session = await getAuthSession();
 
         if (!session) {
@@ -54,7 +56,7 @@ export async function POST(
 
         const message = await db.supportMessage.create({
             data: {
-                ticketId: params.id,
+                ticketId: id,
                 senderId: session.id,
                 text,
                 isAdmin: isAdmin
@@ -63,7 +65,7 @@ export async function POST(
 
         // Get the ticket to find the participant
         const ticket = await db.supportTicket.findUnique({
-            where: { id: params.id }
+            where: { id }
         });
 
         if (ticket) {
@@ -90,9 +92,9 @@ export async function POST(
                         data: {
                             userId: admin.id,
                             title: 'New Support Required',
-                            message: `Ticket #${params.id.slice(-6).toUpperCase()}: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`,
+                            message: `Ticket #${id.slice(-6).toUpperCase()}: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`,
                             type: 'WARNING',
-                            relatedId: params.id
+                            relatedId: id
                         }
                     });
                 }
@@ -101,7 +103,7 @@ export async function POST(
 
         // Update ticket's updatedAt for sorting
         await db.supportTicket.update({
-            where: { id: params.id },
+            where: { id },
             data: { updatedAt: new Date() }
         });
 

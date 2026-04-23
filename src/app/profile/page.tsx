@@ -191,7 +191,10 @@ export default function ProfilePage() {
                     <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-500 to-blue-500" />
                     <CardContent className="pt-8 pb-8 flex flex-col items-center text-center">
                         <div className="bg-white p-2 rounded-xl shadow-inner border border-gray-100 mb-4">
-                            <QRCode value={user.id} size={120} />
+                            <QRCode 
+                                value={JSON.stringify({ userId: user.id, type: 'PAYMENT_RECEIVE', name: user.name })} 
+                                size={120} 
+                            />
                         </div>
                         <h2 className="text-xl font-bold text-gray-900">{user.name}</h2>
                         <p className="text-sm text-gray-500 mb-4">{user.phone}</p>
