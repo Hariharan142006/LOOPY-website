@@ -25,7 +25,7 @@ export async function POST(request: Request) {
         // Find existing address or use a generic one/handle coordination
         const existingAddress = await db.address.findFirst({
             where: {
-                userId: decoded.id,
+                userId: session.id,
                 lat: location.lat,
                 lng: location.lng
             }
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
             // Create a temporary/new address for this pickup
             const newAddress = await db.address.create({
                 data: {
-                    userId: decoded.id,
+                    userId: session.id,
                     street: location.address.split(',')[0] || 'Unknown Street',
                     city: 'Unknown City', // Geocoding would happen here usually
                     state: 'Unknown State',
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
         // Create the booking
         const booking = await db.booking.create({
             data: {
-                userId: decoded.id,
+                userId: session.id,
                 addressId,
                 status: 'PENDING',
                 scheduledAt: new Date(`${schedule.date}T${schedule.time || '09:30'}:00`),

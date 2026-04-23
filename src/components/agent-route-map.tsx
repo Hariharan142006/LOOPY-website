@@ -93,7 +93,6 @@ function MapInteractionDetector({ onInteraction }: { onInteraction: () => void }
         dragstart: () => onInteraction(),
         zoomstart: () => onInteraction(),
         mousedown: () => onInteraction(),
-        touchstart: () => onInteraction(),
     });
     return null;
 }

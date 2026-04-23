@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyToken } from '@/lib/jwt';
 import { headers } from 'next/headers';
+import { getAuthSession } from '@/lib/auth';
 
 export async function GET(
     request: Request,
