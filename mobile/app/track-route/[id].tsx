@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { api } from '../../utils/api';
-import Geolocation from 'react-native-geolocation-service';
+import Geolocation from '@react-native-community/geolocation';
 import { PermissionsAndroid, Platform } from 'react-native';
 import SwipeButton from '../../components/SwipeButton';
 import { LoopyColors } from '../../constants/colors';
@@ -61,23 +61,45 @@ export default function AgentRouteScreen() {
         }
     };
 
+    const initialFetchDone = useRef(false);
+
     useEffect(() => {
-        fetchTaskData();
+        if (mapRef.current && booking) {
+            const coords = [
+                { latitude: booking.pickupLat, longitude: booking.pickupLng }
+            ];
+            if (agentLocation) {
+                coords.push({ latitude: agentLocation.latitude, longitude: agentLocation.longitude });
+            }
+            
+            mapRef.current.fitToCoordinates(coords, {
+                edgePadding: { top: 100, right: 100, bottom: 300, left: 100 },
+                animated: true,
+            });
+        }
+    }, [booking, agentLocation]);
+
+    useEffect(() => {
+        if (!initialFetchDone.current) {
+            fetchTaskData();
+            initialFetchDone.current = true;
+        }
         
         let watchId: number | null = null;
         (async () => {
             let hasPermission = false;
-            if (Platform.OS === 'ios') {
-                const auth = await Geolocation.requestAuthorization('whenInUse');
-                hasPermission = auth === 'granted';
-            } else {
-                const granted = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-                );
-                hasPermission = granted === PermissionsAndroid.RESULTS.GRANTED;
-            }
+            const granted = await PermissionsAndroid.requestMultiple([
+                PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+            ]);
+            hasPermission = 
+                granted[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED ||
+                granted[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED;
 
             if (hasPermission) {
+                // Safety delay
+                await new Promise(r => setTimeout(r, 200));
+
                 watchId = Geolocation.watchPosition(
                     (loc) => {
                         setAgentLocation(loc.coords);
@@ -99,8 +121,13 @@ export default function AgentRouteScreen() {
                             }
                         }
                     },
-                    (error) => console.log(error),
-                    { enableHighAccuracy: true, distanceFilter: 5 }
+                    (error) => console.log('WatchPosition Error:', error),
+                    { 
+                        enableHighAccuracy: true, 
+                        distanceFilter: 5,
+                        interval: 5000,
+                        fastestInterval: 2000,
+                    }
                 );
             }
         })();
@@ -108,11 +135,25 @@ export default function AgentRouteScreen() {
         return () => {
             if (watchId !== null) Geolocation.clearWatch(watchId);
         };
-    }, [booking, notified, rideStarted]);
+    }, [notified, rideStarted]); // Removed booking to avoid infinite loop
+
 
     const openInMaps = () => {
-        const url = `https://www.google.com/maps/dir/?api=1&destination=${booking.pickupLat},${booking.pickupLng}&travelmode=driving`;
-        Linking.openURL(url);
+        const lat = booking.pickupLat;
+        const lng = booking.pickupLng;
+        const scheme = Platform.OS === 'android' ? 'google.navigation:q=' : 'maps:0,0?q=';
+        const url = Platform.OS === 'android' 
+            ? `${scheme}${lat},${lng}` 
+            : `${scheme}${booking?.user?.name || 'Customer'}@${lat},${lng}`;
+            
+        Linking.canOpenURL(url).then(supported => {
+            if (supported) {
+                Linking.openURL(url);
+            } else {
+                const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+                Linking.openURL(webUrl);
+            }
+        });
     };
 
     if (loading || !booking) return <View style={styles.center}><ActivityIndicator size="large" color="#10b981" /></View>;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { api } from '../../utils/api';
@@ -33,7 +33,7 @@ export default function InvoiceScreen() {
             <html>
                 <head>
                     <style>
-                        body { font-family: 'Helvetica', sans-serif; padding: 40px; color: #111827; }
+                        body { font-family: 'Poppins', sans-serif; padding: 40px; color: #111827; }
                         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #10b981; padding-bottom: 20px; margin-bottom: 30px; }
                         .logo { font-size: 28px; font-weight: 900; color: #10b981; }
                         .invoice-title { font-size: 20px; font-weight: bold; color: #6b7280; }
@@ -50,7 +50,9 @@ export default function InvoiceScreen() {
                 </head>
                 <body>
                     <div class="header">
-                        <div class="logo">LOOPY</div>
+                        <div class="logo">
+                            <img src="https://loopy-backend-murex.vercel.app/logo.png" style="height: 60px;" />
+                        </div>
                         <div class="invoice-title">DIGITAL INVOICE</div>
                     </div>
                     
@@ -126,7 +128,11 @@ export default function InvoiceScreen() {
                 <Animated.View entering={FadeInUp} style={styles.invoiceCard}>
                     <View style={styles.brandRow}>
                         <View>
-                            <Text style={styles.brandName}>LOOPY</Text>
+                            <Image 
+                                source={require('../../assets/images/logo.png')} 
+                                style={styles.brandLogo} 
+                                resizeMode="contain"
+                            />
                             <Text style={styles.invoiceId}>#{booking.id.slice(-8).toUpperCase()}</Text>
                         </View>
                         <View style={styles.verifiedBadge}>
@@ -196,6 +202,7 @@ const styles = StyleSheet.create({
     invoiceCard: { backgroundColor: '#fff', borderRadius: 32, padding: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 20, elevation: 5 },
     brandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 },
     brandName: { fontSize: 24, fontWeight: '900', color: LoopyColors.green, letterSpacing: -1 },
+    brandLogo: { width: 120, height: 40, marginBottom: 8 },
     invoiceId: { fontSize: 12, fontWeight: '700', color: LoopyColors.grey, marginTop: 2 },
     verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#f0fdf4', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: '#d1fae5' },
     verifiedText: { fontSize: 10, fontWeight: '800', color: '#059669' },

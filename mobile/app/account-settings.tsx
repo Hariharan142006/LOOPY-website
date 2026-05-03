@@ -39,7 +39,7 @@ export default function AccountSettingsScreen() {
         try {
           await TouchID.isSupported();
         } catch (e) {
-          Alert.alert("Not Available", "Biometric authentication is not set up on this device.");
+          Alert.alert(t('not_available' as any), t('biometrics_not_supported' as any));
           return;
         }
 
@@ -48,7 +48,7 @@ export default function AccountSettingsScreen() {
 
       await api.patch('/api/user/settings', { biometricsEnabled: value });
       setProfile({ ...profile, biometricsEnabled: value });
-      Alert.alert("Success", `Biometrics ${value ? 'enabled' : 'disabled'} successfully.`);
+      Alert.alert(t('success'), `${t('biometric_auth')} ${value ? t('enabled' as any) : t('disabled' as any)} ${t('successfully' as any)}.`);
     } catch (error) {
       Alert.alert("Error", "Failed to update biometric settings.");
     }
@@ -56,15 +56,15 @@ export default function AccountSettingsScreen() {
 
   const validatePassword = () => {
     if (!passData.current || !passData.new || !passData.confirm) {
-      Alert.alert("Error", "Please fill all password fields.");
+      Alert.alert(t('error'), t('pass_fill_all' as any));
       return false;
     }
     if (passData.new !== passData.confirm) {
-      Alert.alert("Error", "New passwords do not match.");
+      Alert.alert(t('error'), t('pass_no_match' as any));
       return false;
     }
     if (passData.new.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters.");
+      Alert.alert(t('error'), t('pass_min_length' as any));
       return false;
     }
     return true;
@@ -79,7 +79,7 @@ export default function AccountSettingsScreen() {
         currentPassword: passData.current,
         newPassword: passData.new
       });
-      Alert.alert("Success", "Password changed successfully!");
+      Alert.alert(t('success'), t('pass_change_success' as any));
       setPassModalVisible(false);
       setPassData({ current: '', new: '', confirm: '' });
     } catch (error: any) {
@@ -128,11 +128,33 @@ export default function AccountSettingsScreen() {
                   <View style={styles.profileTexts}>
                     <Text style={styles.profileName}>{profile?.name}</Text>
                     <Text style={styles.profileEmail}>{profile?.email}</Text>
-                    <Text style={styles.profilePhone}>{profile?.phone || 'No phone added'}</Text>
+                    <Text style={styles.profilePhone}>{profile?.phone || t('no_phone_added' as any)}</Text>
                   </View>
                 </View>
               </View>
             </View>
+
+            {profile?.role === 'AGENT' && profile?.assignedVehicles?.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{t('fleet_details' as any)}</Text>
+                <View style={styles.group}>
+                  {profile.assignedVehicles.map((v: any) => (
+                    <View key={v.id} style={styles.fleetItem}>
+                      <View style={styles.fleetIcon}>
+                        <Ionicons name="car-outline" size={24} color={LoopyColors.green} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.fleetName}>{v.name}</Text>
+                        <Text style={styles.fleetPlate}>{v.licensePlate}</Text>
+                      </View>
+                      <View style={styles.fleetBadge}>
+                        <Text style={styles.fleetBadgeText}>{v.vehicleType}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{t('security_section')}</Text>
@@ -141,6 +163,11 @@ export default function AccountSettingsScreen() {
                   icon="lock-closed-outline" 
                   label={t('change_password')} 
                   onPress={() => setPassModalVisible(true)} 
+                />
+                <SettingItem 
+                  icon="location-outline" 
+                  label={t('manage_addresses')} 
+                  onPress={() => navigation.navigate('ManageAddresses')} 
                 />
                 <SettingItem 
                   icon="finger-print-outline" 
@@ -191,14 +218,14 @@ export default function AccountSettingsScreen() {
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Change Password</Text>
+              <Text style={styles.modalTitle}>{t('change_password')}</Text>
               <TouchableOpacity onPress={() => setPassModalVisible(false)}>
                 <Ionicons name="close" size={24} color={LoopyColors.charcoal} />
               </TouchableOpacity>
             </View>
             
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Current Password</Text>
+              <Text style={styles.inputLabel}>{t('current_password' as any)}</Text>
               <TextInput
                 style={styles.input}
                 secureTextEntry
@@ -209,7 +236,7 @@ export default function AccountSettingsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>New Password</Text>
+              <Text style={styles.inputLabel}>{t('new_password' as any)}</Text>
               <TextInput
                 style={styles.input}
                 secureTextEntry
@@ -220,7 +247,7 @@ export default function AccountSettingsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Confirm New Password</Text>
+              <Text style={styles.inputLabel}>{t('confirm_new_password' as any)}</Text>
               <TextInput
                 style={styles.input}
                 secureTextEntry
@@ -288,4 +315,10 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#F9FAFB', borderRadius: 16, padding: 16, fontSize: 16, borderWidth: 1, borderColor: '#eee' },
   saveBtn: { backgroundColor: LoopyColors.charcoal, borderRadius: 20, padding: 20, alignItems: 'center', marginTop: 12 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  fleetItem: { flexDirection: 'row', alignItems: 'center', padding: 16 },
+  fleetIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: LoopyColors.green + '10', alignItems: 'center', justifyContent: 'center', marginRight: 16 },
+  fleetName: { fontSize: 16, fontWeight: '800', color: LoopyColors.charcoal },
+  fleetPlate: { fontSize: 13, color: LoopyColors.grey, marginTop: 2 },
+  fleetBadge: { backgroundColor: LoopyColors.lightGrey, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  fleetBadgeText: { fontSize: 10, fontWeight: '800', color: LoopyColors.charcoal, textTransform: 'uppercase' },
 });

@@ -8,6 +8,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { Colors, LoopyColors } from '../../constants/colors';
 import { Fonts, FontSizes } from '../../constants/typography';
 import { Spacing, BorderRadius } from '../../constants/layout';
+import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from '../../hooks/useTranslation';
 
 
@@ -16,6 +17,7 @@ const { width } = Dimensions.get('window');
 export default function WalletScreen() {
   const { user } = useAuth();
   const { t, currentLanguage } = useTranslation();
+  const navigation = useNavigation<any>();
   const [wallet, setWallet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,15 +46,16 @@ export default function WalletScreen() {
 
   const handleWithdraw = () => {
     if ((wallet?.balance || 0) < 100) {
-      Alert.alert(t('error'), 'Minimum withdrawal amount is ₹100.');
+      Alert.alert(t('error'), 'Minimum withdrawal amount is ₹100. Complete more pickups to reach the minimum.');
       return;
     }
     Alert.alert(
-        t('confirm'), 
-        `₹${Number(wallet.balance).toFixed(2)} will be transferred to your linked UPI/Bank account.`,
+        t('withdraw_now'),
+        `Withdraw ₹${Number(wallet.balance).toFixed(2)} to your account?`,
         [
             { text: t('cancel'), style: 'cancel' },
-            { text: t('confirm'), onPress: () => Alert.alert(t('success'), 'Transfer initiated! Funds will arrive within 24 hours.') }
+            { text: 'Bank Account', onPress: () => Alert.alert('✅ Transfer Initiated', 'Your ₹' + Number(wallet.balance).toFixed(2) + ' will arrive in your bank within 24-48 hours.') },
+            { text: 'UPI', onPress: () => Alert.alert('✅ UPI Transfer Sent', '₹' + Number(wallet.balance).toFixed(2) + ' sent to your linked UPI. Usually instant!') }
         ]
     );
   };
@@ -72,7 +75,13 @@ export default function WalletScreen() {
       <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
          <Text style={styles.headerTitle}>{t('my_wallet')}</Text>
-         <TouchableOpacity style={styles.helpBtn}>
+         <TouchableOpacity 
+            style={styles.helpBtn} 
+            onPress={() => Alert.alert(
+              t('wallet_info'), 
+              '• Earnings are added after each successful pickup.\n• Minimum withdrawal is ₹100.\n• Transfers usually take 24-48 hours to reflect in your bank.'
+            )}
+         >
             <Ionicons name="help-circle-outline" size={24} color={LoopyColors.charcoal} />
          </TouchableOpacity>
       </View>
@@ -80,7 +89,7 @@ export default function WalletScreen() {
       <ScrollView 
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={LoopyColors.green} />}
-          contentContainerStyle={{ paddingBottom: Spacing['4xl'] }}
+          contentContainerStyle={{ paddingBottom: 150 }}
       >
         <View style={styles.content}>
           <Animated.View entering={FadeInUp} style={styles.balanceCard}>
@@ -154,7 +163,7 @@ export default function WalletScreen() {
           <View style={styles.historySection}>
               <View style={styles.sectionHeaderRow}>
                  <Text style={styles.sectionHeader}>{t('history')}</Text>
-                 <TouchableOpacity><Text style={styles.viewAllText}>{t('see_all')}</Text></TouchableOpacity>
+                 <TouchableOpacity onPress={() => navigation.navigate('History')}><Text style={styles.viewAllText}>{t('see_all')}</Text></TouchableOpacity>
               </View>
 
               {(!wallet?.transactions || wallet.transactions.length === 0) ? (

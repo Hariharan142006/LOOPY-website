@@ -182,7 +182,11 @@ export default function TrackingScreen() {
                         </View>
                         <View style={{ flex: 1, marginLeft: 16 }}>
                             <Text style={styles.agentName}>{booking.agent?.name || 'Assigning Agent...'}</Text>
-                            <Text style={styles.agentSub}>Loopy Professional</Text>
+                            <Text style={styles.agentSub}>
+                                {booking.agent?.assignedVehicles?.[0] 
+                                    ? `${booking.agent.assignedVehicles[0].name} • ${booking.agent.assignedVehicles[0].licensePlate}` 
+                                    : 'Loopy Professional'}
+                            </Text>
                         </View>
                         {booking.agent?.phone && (
                             <TouchableOpacity style={styles.callCircle} onPress={() => Linking.openURL(`tel:${booking.agent.phone}`)}>

@@ -17,22 +17,27 @@ export const CustomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
   return (
     <View style={[styles.container, { bottom: insets.bottom > 0 ? insets.bottom : 20 }]}>
       <View style={styles.content}>
-        {state.routes.map((route, index) => {
+        {state.routes.reduce((acc: any[], route, index) => {
           const options = descriptors[route.key].options as any;
-          const label = options.tabBarLabel !== undefined
+          let label = options.tabBarLabel !== undefined
             ? options.tabBarLabel
             : options.title !== undefined
             ? options.title
             : route.name;
 
           // Skip hidden tabs based on name and role
-          if (route.name === 'explore') return null;
-          if (route.name === 'pickups' && !isAgent) return null;
-          if (route.name === 'bookings' && isAgent) return null;
+          if (route.name === 'explore') return acc;
+          if (route.name === 'pickups' && !isAgent) return acc;
+          if (route.name === 'bookings' && isAgent) return acc;
           
           // Legacy check for expo-router hidden tabs
           if (options.href === null || options.tabBarButton === null || options.display === 'none') {
-            return null;
+            return acc;
+          }
+
+          // Override wallet label to Withdraw as per user request
+          if (route.name === 'wallet') {
+            label = 'Withdraw';
           }
 
           const isFocused = state.index === index;
@@ -59,7 +64,7 @@ export const CustomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
           const getIcon = (name: string, focused: boolean) => {
             let iconName: any = 'home';
             switch (name) {
-              case 'index': iconName = focused ? 'leaf' : 'leaf-outline'; break;
+              case 'index': iconName = focused ? 'home' : 'home-outline'; break;
               case 'pickups': iconName = focused ? 'bicycle' : 'bicycle-outline'; break;
               case 'bookings': iconName = focused ? 'calendar' : 'calendar-outline'; break;
               case 'wallet': iconName = focused ? 'wallet' : 'wallet-outline'; break;
@@ -68,7 +73,7 @@ export const CustomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
             return <Ionicons name={iconName} size={22} color={focused ? LoopyColors.success : LoopyColors.grey} />;
           };
 
-          return (
+          acc.push(
             <TouchableOpacity
               key={route.key}
               accessibilityRole="button"
@@ -91,7 +96,24 @@ export const CustomTabBar = ({ state, descriptors, navigation }: BottomTabBarPro
               </Text>
             </TouchableOpacity>
           );
-        })}
+
+          // Insert middle "+" button for customers
+          if (!isAgent && acc.length === 2) {
+            acc.push(
+              <View key="middle-btn" style={styles.middleButtonWrapper}>
+                <TouchableOpacity 
+                  style={styles.middleButton}
+                  onPress={() => navigation.navigate('Book')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="add" size={32} color="#ffffff" />
+                </TouchableOpacity>
+              </View>
+            );
+          }
+
+          return acc;
+        }, [])}
       </View>
     </View>
   );
@@ -109,7 +131,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#ffffff',
     borderRadius: 40,
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 8,
     width: '100%',
     justifyContent: 'space-between',
@@ -132,10 +154,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     borderRadius: 30,
-    marginHorizontal: 4,
+    marginHorizontal: 2,
   },
   activeTabItem: {
-    backgroundColor: '#dcfce7', // Light green background for active tab
+    // transparent active bg as seen in mockup
   },
   label: {
     fontSize: 9,
@@ -143,5 +165,32 @@ const styles = StyleSheet.create({
     marginTop: 4,
     letterSpacing: 0.5,
     textTransform: 'capitalize',
+  },
+  middleButtonWrapper: {
+    width: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  middleButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#10b981', // LoopyColors.success
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -30, // Float above the bar
+    borderWidth: 4,
+    borderColor: '#fcfcfc', // Background color match
+    ...Platform.select({
+      ios: {
+        shadowColor: '#10b981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 6,
+      },
+    }),
   },
 });

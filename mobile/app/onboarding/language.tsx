@@ -7,6 +7,7 @@ import { LoopyColors } from '../../constants/colors';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { LanguageCode } from '../../constants/translations';
+import { useTranslation } from '../../hooks/useTranslation';
 
 const LANGUAGES = [
   { code: 'en', label: 'English', sub: 'Default Language' },
@@ -20,6 +21,7 @@ const LANGUAGES = [
 export default function LanguageSelectionScreen() {
   const navigation = useNavigation<any>();
   const { user, updateUser } = useAuth();
+  const { t } = useTranslation();
   const [selectedLang, setSelectedLang] = useState<LanguageCode>((user?.preferredLanguage as LanguageCode) || 'en');
   const [loading, setLoading] = useState(false);
 
@@ -36,13 +38,23 @@ export default function LanguageSelectionScreen() {
       // Always update local state
       await updateUser({ preferredLanguage: selectedLang });
       
-      // Navigate to tutorial
-      navigation.navigate('OnboardingDetails');
+      if (user?.role === 'AGENT') {
+        navigation.navigate('OnboardingFleet');
+      } else {
+        // Mark as onboarded for customers
+        await api.post('/api/user/profile', { onboarded: true });
+        await updateUser({ onboarded: true });
+        // Main stack will pick up the onboarded: true and move to Main tabs
+      }
     } catch (error: any) {
       console.log('Language save error:', error);
       // Fallback: still update local and proceed
       await updateUser({ preferredLanguage: selectedLang });
-      navigation.navigate('OnboardingTutorial');
+      if (user?.role === 'AGENT') {
+        navigation.navigate('OnboardingFleet');
+      } else {
+        await updateUser({ onboarded: true });
+      }
     } finally {
       setLoading(false);
     }
@@ -55,10 +67,10 @@ export default function LanguageSelectionScreen() {
           <View style={styles.stepIndicator}>
             <View style={styles.stepDotActive} />
             <View style={[styles.stepDot, styles.stepDotActive]} />
-            <View style={styles.stepDot} />
+            {user?.role === 'AGENT' && <View style={styles.stepDot} />}
           </View>
-          <Text style={styles.title}>App Language</Text>
-          <Text style={styles.subtitle}>Select your preferred language for a better experience</Text>
+          <Text style={styles.title}>{t('onboarding_language_title' as any)}</Text>
+          <Text style={styles.subtitle}>{t('onboarding_language_sub' as any)}</Text>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(400)} style={styles.list}>
@@ -99,7 +111,7 @@ export default function LanguageSelectionScreen() {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Text style={styles.buttonText}>Continue</Text>
+              <Text style={styles.buttonText}>{t('continue' as any)}</Text>
               <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginLeft: 8 }} />
             </>
           )}

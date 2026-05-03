@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import Animated, { FadeInUp, FadeInDown, FadeInRight } from 'react-native-reanimated';
 import { LoopyColors } from '../constants/colors';
 import { useTranslation } from '../hooks/useTranslation';
+import { Fonts } from '../constants/typography';
 
 const { width } = Dimensions.get('window');
 
@@ -138,43 +139,20 @@ export default function RatesScreen() {
         </Animated.View>
 
         {/* Items Grid */}
-        <Animated.View entering={FadeInUp.delay(200)} style={styles.grid}>
+        <Animated.View entering={FadeInUp.delay(200)} style={styles.listContainer}>
           {filteredItems.map((item: any, index: number) => {
-            const isTrending = item.currentPrice > item.basePrice;
-            const subCat = categories.find((c: any) => c.items?.some((i: any) => i.id === item.id))?.name || 'Scrap';
-            
             return (
-              <Animated.View key={item.id} entering={FadeInDown.delay(index * 50)} style={styles.marketCard}>
-                <View style={styles.cardImageContainer}>
-                   <View style={styles.itemIconCircle}>
-                      <Ionicons 
-                        name={ITEM_ICONS[item.name] || 'cube-outline'} 
-                        size={32} 
-                        color="#1e3a8a" 
-                      />
-                   </View>
+              <Animated.View key={item.id} entering={FadeInDown.delay(index * 50)} style={styles.marketListCard}>
+                <View style={styles.cardIconBox}>
+                   <Ionicons 
+                     name={ITEM_ICONS[item.name] || 'cube'} 
+                     size={36} 
+                     color="#4b5563" 
+                   />
                 </View>
-
-                {/* Status Badge */}
-                <View style={[styles.statusBadge, { backgroundColor: isTrending ? '#fef2f2' : '#f0fdf4' }]}>
-                   <Text style={[styles.statusText, { color: isTrending ? '#ef4444' : '#22c55e' }]}>
-                      {isTrending ? 'TRENDING' : 'STABLE'}
-                   </Text>
-                </View>
-
-                <View style={styles.cardInfo}>
-                   <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                   <View style={styles.priceRow}>
-                      <Text style={styles.priceVal}>₹{Number(item.currentPrice).toFixed(2)}</Text>
-                      <Text style={styles.unitText}>/kg</Text>
-                   </View>
-                   
-                   <View style={styles.cardFooter}>
-                      <Text style={styles.subCatText}>{subCat}</Text>
-                      <TouchableOpacity style={styles.addBtn}>
-                         <Ionicons name="add" size={20} color={LoopyColors.charcoal} />
-                      </TouchableOpacity>
-                   </View>
+                <View style={styles.cardInfoRow}>
+                   <Text style={styles.itemNameList}>{item.name}</Text>
+                   <Text style={styles.priceValList}>₹{Number(item.currentPrice).toFixed(0)}/Unit</Text>
                 </View>
               </Animated.View>
             );
@@ -199,7 +177,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff'
   },
   headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 22, fontWeight: '900', color: '#166534', letterSpacing: -0.5 },
+  headerTitle: { fontSize: 22, fontFamily: Fonts.bold, color: '#166534', letterSpacing: -0.5 },
   
   scroll: { paddingBottom: 100 },
   
@@ -215,7 +193,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0'
   },
-  searchInput: { flex: 1, fontSize: 16, color: '#1e293b', fontWeight: '500', marginLeft: 10 },
+  searchInput: { flex: 1, fontSize: 16, color: '#1e293b', fontFamily: Fonts.medium, marginLeft: 10 },
   micBtn: { padding: 4 },
 
   tabContainer: { paddingVertical: 16 },
@@ -227,7 +205,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#e2e8f0',
   },
   tabActive: { backgroundColor: '#166534' },
-  tabText: { fontSize: 14, fontWeight: '700', color: '#64748b' },
+  tabText: { fontSize: 14, fontFamily: Fonts.bold, color: '#64748b' },
   tabTextActive: { color: '#fff' },
 
   highlightBox: { 
@@ -245,8 +223,8 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
   },
   highlightContent: { zIndex: 1 },
-  highlightTag: { color: '#bbf7d0', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
-  highlightTitle: { color: '#fff', fontSize: 26, fontWeight: '900', marginBottom: 20, lineHeight: 32 },
+  highlightTag: { color: '#bbf7d0', fontSize: 10, fontFamily: Fonts.bold, letterSpacing: 1, marginBottom: 8 },
+  highlightTitle: { color: '#fff', fontSize: 26, fontFamily: Fonts.bold, marginBottom: 20, lineHeight: 32 },
   viewTrendsBtn: { 
     backgroundColor: '#fff', 
     paddingHorizontal: 16, 
@@ -254,15 +232,16 @@ const styles = StyleSheet.create({
     borderRadius: 12, 
     alignSelf: 'flex-start' 
   },
-  viewTrendsText: { color: '#166534', fontSize: 12, fontWeight: '900' },
+  viewTrendsText: { color: '#166534', fontSize: 12, fontFamily: Fonts.bold },
   highlightIcon: { position: 'absolute', right: -10, bottom: -20 },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 24, gap: 16 },
-  marketCard: { 
-    width: (width - 64) / 2, 
+  listContainer: { paddingHorizontal: 24, gap: 16 },
+  marketListCard: { 
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff', 
-    borderRadius: 24, 
-    padding: 12,
+    borderRadius: 20, 
+    padding: 16,
     borderWidth: 1,
     borderColor: '#f1f5f9',
     elevation: 2,
@@ -271,47 +250,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 10,
   },
-  cardImageContainer: { 
-    height: 120, 
-    backgroundColor: '#e0f2fe', 
-    borderRadius: 20, 
+  cardIconBox: { 
+    width: 64,
+    height: 64,
+    backgroundColor: '#f8fafc', 
+    borderRadius: 16, 
     alignItems: 'center', 
     justifyContent: 'center',
-    marginBottom: 12,
+    marginRight: 16,
   },
-  itemIconCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.5)', alignItems: 'center', justifyContent: 'center' },
-  statusBadge: { 
-    position: 'absolute', 
-    top: 140, 
-    left: 12, 
-    paddingHorizontal: 8, 
-    paddingVertical: 4, 
-    borderRadius: 6,
-    zIndex: 2,
-  },
-  statusText: { fontSize: 8, fontWeight: '900', letterSpacing: 0.5 },
-  
-  cardInfo: { marginTop: 28 },
-  itemName: { fontSize: 15, fontWeight: '800', color: '#1e293b', marginBottom: 4 },
-  priceRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 12 },
-  priceVal: { fontSize: 20, fontWeight: '900', color: '#0f172a' },
-  unitText: { fontSize: 12, color: '#64748b', marginLeft: 2, fontWeight: '600' },
-  
-  cardFooter: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    paddingTop: 10,
-  },
-  subCatText: { fontSize: 11, color: '#94a3b8', fontWeight: '600' },
-  addBtn: { 
-    width: 32, 
-    height: 32, 
-    borderRadius: 10, 
-    backgroundColor: '#bbf7d0', 
-    alignItems: 'center', 
-    justifyContent: 'center' 
-  },
+  cardInfoRow: { flex: 1, justifyContent: 'center' },
+  itemNameList: { fontSize: 16, fontFamily: Fonts.bold, color: '#334155', marginBottom: 6 },
+  priceValList: { fontSize: 18, fontFamily: Fonts.bold, color: '#16a34a' },
 });

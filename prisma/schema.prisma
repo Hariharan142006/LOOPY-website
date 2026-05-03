@@ -62,6 +62,8 @@ model WalletTransaction {
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
 }
 
 model Address {
@@ -77,6 +79,8 @@ model Address {
   
   user      User    @relation(fields: [userId], references: [id])
   bookings  Booking[]
+
+  @@index([userId])
 }
 
 model ScrapCategory {
@@ -128,6 +132,10 @@ model Booking {
   address     Address  @relation(fields: [addressId], references: [id])
   
   review      Review?
+
+  @@index([userId])
+  @@index([agentId])
+  @@index([status])
 }
 
 model BookingItem {
@@ -140,6 +148,8 @@ model BookingItem {
   
   booking     Booking  @relation(fields: [bookingId], references: [id])
   item        ScrapItem @relation(fields: [itemId], references: [id])
+
+  @@index([bookingId])
 }
 
 model Review {
@@ -156,6 +166,9 @@ model Review {
 
   agentId    String  @db.ObjectId
   agent      User    @relation("ReceivedReviews", fields: [agentId], references: [id])
+
+  @@index([agentId])
+  @@index([customerId])
 }
 
 model Notification {
@@ -170,6 +183,9 @@ model Notification {
 
 
   user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([isRead])
 }
 
 model Company {

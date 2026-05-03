@@ -34,8 +34,8 @@ export default function ProfileScreen() {
            const completed = agentRes.data.completed || [];
            setStats({
              pickups: completed.length,
-             recycled: completed.reduce((acc: number, b: any) => acc + (b.items?.reduce((ia: number, i: any) => ia + (i.quantity || 0), 0) || 0), 124.8), 
-             earned: Math.floor(walletRes.data.balance || 24000) 
+             recycled: completed.reduce((acc: number, b: any) => acc + (b.items?.reduce((ia: number, i: any) => ia + (i.quantity || 0), 0) || 0), 0), 
+             earned: Math.floor(walletRes.data.balance || 0) 
            });
         } else {
            const [bookingsRes, walletRes] = await Promise.all([
@@ -45,9 +45,9 @@ export default function ProfileScreen() {
            const bookings = bookingsRes.data.bookings || [];
            const completedPickups = bookings.filter((b: any) => b.status === 'COMPLETED').length;
            setStats({
-             pickups: completedPickups || 30,
-             recycled: walletRes.data.impact?.kgRecycled || 519.1,
-             earned: Math.floor(walletRes.data.balance || 24000)
+             pickups: completedPickups || 0,
+             recycled: walletRes.data.impact?.kgRecycled || 0,
+             earned: Math.floor(walletRes.data.balance || 0)
            });
         }
       } catch (error) {
@@ -105,8 +105,8 @@ export default function ProfileScreen() {
     );
   };
 
-  const MenuItem = ({ icon, label, onPress, color, subValue, isHot, delay = 0 }: any) => (
-    <Animated.View entering={SlideInRight.delay(delay)}>
+  const MenuItem = ({ icon, label, onPress, color, subValue, isHot }: any) => (
+    <View>
       <TouchableOpacity style={styles.menuItemCard} onPress={onPress}>
          <View style={[styles.menuIconCircle, { backgroundColor: color + '15' }]}>
             <Ionicons name={icon} size={22} color={color} />
@@ -122,16 +122,16 @@ export default function ProfileScreen() {
          )}
          <Ionicons name="chevron-forward" size={18} color={LoopyColors.border} />
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
         
         {/* Top Profile Header */}
-        <Animated.View entering={FadeInUp} style={styles.profileHeader}>
+        <View style={styles.profileHeader}>
           <TouchableOpacity 
             style={styles.avatarContainer} 
             onPress={handlePickImage}
@@ -159,25 +159,25 @@ export default function ProfileScreen() {
           </TouchableOpacity>
           <Text style={styles.profileName}>{(user?.name || 'USER').toUpperCase()}</Text>
           <Text style={styles.memberSince}>{t('member_since')} March 2023</Text>
-        </Animated.View>
+        </View>
 
         {/* High-Fidelity Stats Grid */}
         <View style={styles.statsGridRow}>
-           <Animated.View entering={FadeInUp.delay(200)} style={styles.statPill}>
+           <View style={styles.statPill}>
               <Text style={styles.statNumber}>{loading ? '--' : stats.pickups}</Text>
               <Text style={styles.statTitle}>{isAgent ? t('pickups').toUpperCase() : t('bookings').toUpperCase()}</Text>
-           </Animated.View>
+           </View>
 
-           <Animated.View entering={FadeInUp.delay(300)} style={[styles.statPill, styles.statPillGreen]}>
+           <View style={[styles.statPill, styles.statPillGreen]}>
               <Text style={[styles.statNumber, { color: '#fff' }]}>{loading ? '--' : stats.recycled}</Text>
               <Text style={[styles.statTitle, { color: '#fff', opacity: 0.9 }]}>{t('kg_recycled_label')}</Text>
               <View style={styles.lightOverlay} />
-           </Animated.View>
+           </View>
 
-           <Animated.View entering={FadeInUp.delay(400)} style={styles.statPill}>
+           <View style={styles.statPill}>
               <Text style={styles.statNumber}>₹{(stats.earned / 1000).toFixed(0)}k</Text>
               <Text style={styles.statTitle}>{t('earned')}</Text>
-           </Animated.View>
+           </View>
         </View>
 
         {/* Settings Section */}
@@ -193,7 +193,6 @@ export default function ProfileScreen() {
                 label={t('account_setting')} 
                 subValue={t('security_accessibility')}
                 color="#5b21b6" 
-                delay={500}
                 onPress={() => navigation.navigate('AccountSettings')} 
               />
               <MenuItem 
@@ -201,7 +200,6 @@ export default function ProfileScreen() {
                 label={t('profile_details')} 
                 subValue={t('personal_info')}
                 color="#15803d" 
-                delay={600}
                 onPress={() => navigation.navigate('EditProfile')} 
               />
               <MenuItem 
@@ -209,7 +207,6 @@ export default function ProfileScreen() {
                 label={t('language_notif')} 
                 subValue={t('pref_alerts')}
                 color="#06b6d4" 
-                delay={700}
                 onPress={() => navigation.navigate('LanguageNotifications')} 
               />
               <MenuItem 
@@ -218,18 +215,48 @@ export default function ProfileScreen() {
                 subValue={t('refer_subtitle')}
                 color="#f97316" 
                 isHot={true}
-                delay={800}
                 onPress={() => navigation.navigate('ReferEarn')} 
+              />
+            </View>
+        </View>
+        {/* Legal & Support Section */}
+        <View style={[styles.settingsSection, { marginTop: 32 }]}>
+           <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeading}>{t('legal_support')}</Text>
+              <View style={styles.headingLine} />
+           </View>
+
+           <View style={styles.menuItemsList}>
+              <MenuItem 
+                icon="help-buoy-outline" 
+                label={t('help_center')} 
+                subValue={t('help_center_sub')}
+                color="#ea580c" 
+                onPress={() => navigation.navigate('HelpSupport')} 
+              />
+              <MenuItem 
+                icon="document-text-outline" 
+                label={t('terms_conditions')} 
+                subValue={t('terms_sub')}
+                color="#374151" 
+                onPress={() => navigation.navigate('Terms')} 
+              />
+              <MenuItem 
+                icon="ribbon-outline" 
+                label={t('licenses')} 
+                subValue={t('licenses_sub')}
+                color="#64748b" 
+                onPress={() => navigation.navigate('Licenses')} 
               />
            </View>
         </View>
 
         {/* Logout Button */}
-        <Animated.View entering={FadeInDown.delay(1000)} style={{ paddingHorizontal: 32, marginTop: 40 }}>
+        <View style={{ paddingHorizontal: 32, marginTop: 40 }}>
            <TouchableOpacity style={styles.signOutBtn} onPress={handleLogout}>
               <Text style={styles.signOutText}>{t('sign_out')}</Text>
            </TouchableOpacity>
-        </Animated.View>
+        </View>
 
         <Text style={styles.versionTag}>LOOPY ECO-SYSTEM • v1.1.0</Text>
       </ScrollView>

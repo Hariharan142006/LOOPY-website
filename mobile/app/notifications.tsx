@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, FlatList, RefreshControl, StatusBar, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { api } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Animated, { FadeInUp, FadeInLeft, FadeInDown, Layout } from 'react-native-reanimated';
 import { LoopyColors, Colors } from '../constants/colors';
@@ -17,55 +18,12 @@ const FILTER_TYPES = [
 
 export default function NotificationsScreen() {
   const navigation = useNavigation<any>();
+  const { user } = useAuth();
   const { t } = useTranslation();
   const [activeFilter, setActiveFilter] = useState('all');
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Realistic mock data if API is empty for the "Loopy Vibe"
-  const MOCK_NOTIFS = [
-    {
-      id: '1',
-      type: 'MONEY',
-      title: 'Money Received!',
-      message: 'Your recycling bonus for the month of March has been deposited into your wallet.',
-      createdAt: '2026-04-07T10:00:00Z',
-      isRead: false
-    },
-    {
-      id: '2',
-      type: 'PICKUP',
-      title: 'Pickup Scheduled',
-      message: 'A driver has been assigned to your plastic waste collection for tomorrow morning.',
-      createdAt: '2026-04-06T14:30:00Z',
-      isRead: true
-    },
-    {
-      id: '3',
-      type: 'ALERT',
-      title: 'Payment Method Expired',
-      message: 'Your primary card is expiring soon. Please update your billing details to avoid service interruption.',
-      createdAt: '2026-04-05T09:15:00Z',
-      isRead: false
-    },
-    {
-      id: '4',
-      type: 'IMPACT',
-      title: 'New Impact Milestone!',
-      message: 'You\'ve reached the "Earth Guardian" status after 50 successful pickups. Check your rewards.',
-      createdAt: '2026-04-04T16:45:00Z',
-      isRead: true
-    },
-    {
-       id: '5',
-       type: 'SECURITY',
-       title: 'Security Alert',
-       message: 'A new login was detected on your account from a Chrome browser on Windows.',
-       createdAt: '2026-04-01T22:10:00Z',
-       isRead: true
-    }
-  ];
 
   useEffect(() => {
     fetchNotifications();
@@ -75,11 +33,10 @@ export default function NotificationsScreen() {
     try {
       const response = await api.get('/api/notifications');
       const apiNotifs = response.data.notifications || [];
-      // Combine with mock if empty to maintain the premium feel in demo
-      setNotifications(apiNotifs.length > 0 ? apiNotifs : MOCK_NOTIFS);
+      setNotifications(apiNotifs);
     } catch (e) {
       console.error(e);
-      setNotifications(MOCK_NOTIFS);
+      setNotifications([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -91,45 +48,100 @@ export default function NotificationsScreen() {
     fetchNotifications();
   };
 
-  const getNotifIcon = (type: string) => {
-    switch (type) {
-      case 'MONEY': return { name: 'checkmark-circle', color: '#10b981', bg: '#f0fdf4' };
-      case 'PICKUP': return { name: 'bus', color: '#1d4ed8', bg: '#eff6ff' };
-      case 'ALERT': return { name: 'alert-circle', color: '#ef4444', bg: '#fef2f2' };
-      case 'IMPACT': return { name: 'leaf', color: '#22c55e', bg: '#f0fdf4' };
-      case 'SECURITY': return { name: 'settings', color: '#6b7280', bg: '#f3f4f6' };
-      default: return { name: 'notifications', color: '#10b981', bg: '#f0fdf4' };
+  const markAllAsRead = async () => {
+    try {
+      // Optimistically update UI
+      setNotifications(notifications.map(n => ({ ...n, isRead: true })));
+      const res = await api.post('/api/notifications/read-all');
+      if (res.data.success) {
+        // Success
+      }
+    } catch (e) {
+      console.error('Mark all as read error:', e);
+      // Revert or show error if needed
+      onRefresh(); // Refresh from server to be sure
     }
   };
 
-  const NotificationCard = ({ item, index }: any) => {
+  const handlePress = async (item: any) => {
+    console.log('Notification pressed:', item.id, 'Type:', item.type, 'RelatedId:', item.relatedId);
+
+    // 1. Mark as read immediately in UI
+    if (!item.isRead) {
+      setNotifications(prev => prev.map(n => n.id === item.id ? { ...n, isRead: true } : n));
+      try {
+        await api.post('/api/notifications/read', { id: item.id });
+      } catch (e) {
+        console.log('Error marking as read', e);
+      }
+    }
+
+    // 2. Navigation Logic based on type and role
+    const role = user?.role || 'CUSTOMER';
+
+    if (item.type === 'MONEY' || item.type === 'SUCCESS') {
+      navigation.navigate('Main', { screen: 'wallet' });
+    } else if (item.type === 'PICKUP' || item.type === 'INFO' || item.type === 'ALERT' || item.type === 'WARNING' || item.type === 'ERROR') {
+      if (item.relatedId) {
+        // Customers go to Track, Agents go to TrackRoute
+        const targetScreen = role === 'AGENT' ? 'TrackRoute' : 'Track';
+        navigation.navigate(targetScreen, { id: item.relatedId });
+      } else {
+        navigation.navigate('Main', { screen: 'history' });
+      }
+    } else if (item.type === 'IMPACT') {
+      navigation.navigate('Main', { screen: 'index' });
+    } else if (item.type === 'SECURITY') {
+      navigation.navigate('AccountSettings');
+    }
+  };
+
+  const getNotifIcon = (type: string) => {
+    switch (type) {
+      case 'MONEY':
+      case 'SUCCESS': return { name: 'cash-outline', color: '#10b981', bg: '#ecfdf5' };
+      case 'PICKUP':
+      case 'INFO': return { name: 'bicycle-outline', color: '#3b82f6', bg: '#eff6ff' };
+      case 'ALERT':
+      case 'WARNING': return { name: 'alert-circle-outline', color: '#f59e0b', bg: '#fffbeb' };
+      case 'ERROR': return { name: 'close-circle-outline', color: '#ef4444', bg: '#fef2f2' };
+      case 'IMPACT': return { name: 'leaf-outline', color: '#22c55e', bg: '#f0fdf4' };
+      case 'SECURITY': return { name: 'shield-checkmark-outline', color: '#6366f1', bg: '#eef2ff' };
+      default: return { name: 'notifications-outline', color: '#6b7280', bg: '#f9fafb' };
+    }
+  };
+
+  const NotificationCard = ({ item }: any) => {
      const iconConfig = getNotifIcon(item.type);
      const date = new Date(item.createdAt);
-     const dateString = date.toLocaleDateString('en-GB');
+     
+     // Relative time or formatted date
+     const now = new Date();
+     const isToday = date.toDateString() === now.toDateString();
+     const dateString = isToday 
+        ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 
      return (
-       <Animated.View 
-         entering={FadeInUp.delay(index * 100)}
-         layout={Layout.springify()}
+       <TouchableOpacity 
+          style={[styles.notifCard, !item.isRead && styles.unreadCard]}
+          activeOpacity={0.8}
+          onPress={() => handlePress(item)}
        >
-         <TouchableOpacity 
-            style={[styles.notifCard, !item.isRead && styles.unreadCard]}
-            activeOpacity={0.7}
-         >
-            <View style={[styles.iconContainer, { backgroundColor: iconConfig.bg }]}>
-               <Ionicons name={iconConfig.name as any} size={22} color={iconConfig.color} />
-            </View>
-            <View style={styles.notifContent}>
-               <View style={styles.cardHeader}>
-                  <Text style={styles.notifTitle}>{item.title}</Text>
-                  <Text style={styles.notifDate}>{dateString}</Text>
-               </View>
-               <Text style={styles.notifMessage} numberOfLines={3}>
-                  {item.message}
-               </Text>
-            </View>
-         </TouchableOpacity>
-       </Animated.View>
+          <View style={[styles.iconContainer, { backgroundColor: iconConfig.bg }]}>
+             <Ionicons name={iconConfig.name as any} size={22} color={iconConfig.color} />
+          </View>
+          <View style={styles.notifContent}>
+             <View style={styles.cardHeader}>
+                <Text style={styles.notifTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.notifDate}>{dateString}</Text>
+             </View>
+             <Text style={styles.notifMessage} numberOfLines={2}>
+                {item.message}
+             </Text>
+          </View>
+          {!item.isRead && <View style={styles.unreadDot} />}
+       </TouchableOpacity>
      );
   };
 
@@ -141,60 +153,69 @@ export default function NotificationsScreen() {
     );
   }
 
+  const filteredNotifications = notifications.filter(n => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'pickups') return n.type === 'PICKUP';
+    if (activeFilter === 'alerts') return n.type === 'ALERT' || n.type === 'WARNING' || n.type === 'ERROR';
+    if (activeFilter === 'impact') return n.type === 'IMPACT';
+    return true;
+  });
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
       
-      {/* Premium Custom Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={LoopyColors.green} />
+          <Ionicons name="chevron-back" size={28} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <View style={{ width: 44 }} />
+        <TouchableOpacity style={styles.readAllBtn} onPress={markAllAsRead}>
+           <Ionicons name="checkmark-done" size={20} color="#059669" />
+        </TouchableOpacity>
       </View>
 
-      {/* Filter Section */}
       <View style={styles.filterWrapper}>
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterScroll}
         >
-           {FILTER_TYPES.map((filter, index) => (
-             <Animated.View key={filter.id} entering={FadeInLeft.delay(100 + (index * 50))}>
-               <TouchableOpacity 
-                 onPress={() => setActiveFilter(filter.id)}
-                 style={[
-                   styles.filterChip,
-                   activeFilter === filter.id && styles.activeFilterChip
-                 ]}
-               >
-                 <Text style={[
-                   styles.filterText,
-                   activeFilter === filter.id && styles.activeFilterText
-                 ]}>
-                   {filter.label}
-                 </Text>
-               </TouchableOpacity>
-             </Animated.View>
+           {FILTER_TYPES.map((filter) => (
+             <TouchableOpacity 
+               key={filter.id}
+               onPress={() => setActiveFilter(filter.id)}
+               style={[
+                 styles.filterChip,
+                 activeFilter === filter.id && styles.activeFilterChip
+               ]}
+             >
+               <Text style={[
+                 styles.filterText,
+                 activeFilter === filter.id && styles.activeFilterText
+               ]}>
+                 {filter.label}
+               </Text>
+             </TouchableOpacity>
            ))}
         </ScrollView>
       </View>
 
       <FlatList
-        data={notifications}
+        data={filteredNotifications}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={LoopyColors.green} />}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
-        renderItem={({ item, index }) => <NotificationCard item={item} index={index} />}
+        renderItem={({ item }) => <NotificationCard item={item} />}
         ListEmptyComponent={
-          <Animated.View entering={FadeInDown} style={styles.emptyState}>
-             <Ionicons name="notifications-off-outline" size={80} color="#f3f4f6" />
+          <View style={styles.emptyState}>
+             <View style={styles.emptyIconBg}>
+                <Ionicons name="notifications-off-outline" size={40} color="#9ca3af" />
+             </View>
              <Text style={styles.emptyTitle}>{t('all_caught_up')}</Text>
              <Text style={styles.emptySubtitle}>{t('no_notifications')}</Text>
-          </Animated.View>
+          </View>
         }
       />
     </View>
@@ -202,132 +223,54 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#fcfcfc' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 60,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingBottom: 20,
   },
-  backBtn: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontFamily: Fonts.bold,
-    color: '#065f46', // Dark green matching the image
-  },
+  backBtn: { width: 40, height: 40, justifyContent: 'center' },
+  readAllBtn: { width: 40, height: 40, backgroundColor: '#ecfdf5', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 24, fontFamily: Fonts.bold, color: '#111827', letterSpacing: -0.5 },
   
-  // Filters
-  filterWrapper: {
-    marginBottom: 10,
-  },
-  filterScroll: {
-    paddingHorizontal: 20,
-    gap: 12,
-    paddingBottom: 4,
-  },
-  filterChip: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 100,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  activeFilterChip: {
-    backgroundColor: '#065f46',
-    borderColor: '#065f46',
-  },
-  filterText: {
-    fontSize: 14,
-    fontFamily: Fonts.bold,
-    color: '#6b7280',
-  },
-  activeFilterText: {
-    color: '#fff',
-  },
+  filterWrapper: { marginBottom: 16 },
+  filterScroll: { paddingHorizontal: 20, gap: 10 },
+  filterChip: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 16, backgroundColor: '#fff', borderWidth: 1, borderColor: '#f3f4f6' },
+  activeFilterChip: { backgroundColor: '#111827', borderColor: '#111827' },
+  filterText: { fontSize: 13, fontFamily: Fonts.bold, color: '#6b7280' },
+  activeFilterText: { color: '#fff' },
 
-  // List
-  listContainer: {
-    paddingTop: 10,
-    paddingBottom: 40,
-  },
+  listContainer: { paddingHorizontal: 20, paddingBottom: 40 },
   notifCard: {
     flexDirection: 'row',
-    padding: 20,
+    padding: 16,
     backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  unreadCard: {
-    backgroundColor: '#f0fdf4',
-  },
-  iconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
+    borderRadius: 24,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
     alignItems: 'center',
-    marginRight: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    elevation: 2,
   },
-  notifContent: {
-    flex: 1,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  notifTitle: {
-    fontSize: 16,
-    fontFamily: Fonts.bold,
-    color: '#111827',
-  },
-  notifDate: {
-    fontSize: 12,
-    fontFamily: Fonts.medium,
-    color: '#9ca3af',
-  },
-  notifMessage: {
-    fontSize: 14,
-    fontFamily: Fonts.medium,
-    color: '#6b7280',
-    lineHeight: 20,
-  },
+  unreadCard: { backgroundColor: '#fff', borderColor: '#10b981', borderWidth: 1.5 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10b981', marginLeft: 8 },
+  iconContainer: { width: 48, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  notifContent: { flex: 1 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  notifTitle: { fontSize: 15, fontFamily: Fonts.bold, color: '#111827' },
+  notifDate: { fontSize: 11, fontFamily: Fonts.bold, color: '#9ca3af' },
+  notifMessage: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280', lineHeight: 18 },
 
-  // Empty State
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 100,
-    paddingHorizontal: 40,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontFamily: Fonts.bold,
-    color: '#111827',
-    marginTop: 20,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    fontFamily: Fonts.medium,
-    color: '#9ca3af',
-    textAlign: 'center',
-    marginTop: 8,
-  },
+  emptyState: { alignItems: 'center', justifyContent: 'center', marginTop: 100, paddingHorizontal: 40 },
+  emptyIconBg: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  emptyTitle: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827' },
+  emptySubtitle: { fontSize: 14, fontFamily: Fonts.medium, color: '#9ca3af', textAlign: 'center', marginTop: 8 },
 });

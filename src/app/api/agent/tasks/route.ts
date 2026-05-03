@@ -30,7 +30,7 @@ export async function GET(request: Request) {
         // Return structured data
         return NextResponse.json(result);
     } catch (error) {
-        auditLog(`Agent Tasks GET Error for ID ${session?.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error("Agent Tasks GET Error:", error);
         return NextResponse.json({ error: 'Server error' }, { status: 500 });
     }
 }
@@ -48,9 +48,9 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json();
-        const { lat, lng } = body;
+        const { lat, lng, date } = body;
 
-        const result = await getAgentTasksAction(session.id, lat, lng);
+        const result = await getAgentTasksAction(session.id, lat, lng, date);
         return NextResponse.json(result);
     } catch (error) {
         console.error("Agent Tasks POST Error:", error);

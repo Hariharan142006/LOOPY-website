@@ -7,6 +7,7 @@ import { LoopyColors } from '../../constants/colors';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useTranslation } from '../../hooks/useTranslation';
+import { Fonts } from '../../constants/typography';
 
 export default function PersonalDetailsScreen() {
   const navigation = useNavigation<any>();
@@ -19,11 +20,11 @@ export default function PersonalDetailsScreen() {
 
   const handleContinue = async () => {
     if (!name.trim()) {
-      Alert.alert(t('error'), 'Please enter your full name');
+      Alert.alert(t('error'), t('enter_full_name' as any));
       return;
     }
     if (!phone.trim() || phone.length < 10) {
-      Alert.alert(t('error'), 'Please enter a valid 10-digit phone number');
+      Alert.alert(t('error'), t('enter_valid_phone' as any));
       return;
     }
 
@@ -37,11 +38,7 @@ export default function PersonalDetailsScreen() {
 
       if (response.data.success) {
         await updateUser({ name, phone });
-        if (user?.role === 'AGENT') {
-          navigation.navigate('OnboardingFleet');
-        } else {
-          navigation.navigate('OnboardingTutorial');
-        }
+        navigation.navigate('OnboardingLanguage');
       }
     } catch (error: any) {
       const message = error.response?.data?.error || error.message || 'Failed to save details. Please try again.';
@@ -61,10 +58,10 @@ export default function PersonalDetailsScreen() {
           <View style={styles.stepIndicator}>
             <View style={[styles.stepDot, styles.stepDotActive]} />
             <View style={styles.stepDot} />
-            <View style={styles.stepDot} />
+            {user?.role === 'AGENT' && <View style={styles.stepDot} />}
           </View>
-          <Text style={styles.title}>Personal Details</Text>
-          <Text style={styles.subtitle}>Help us customize your recycling experience</Text>
+          <Text style={styles.title}>{t('onboarding_details_title' as any)}</Text>
+          <Text style={styles.subtitle}>{t('onboarding_details_sub' as any)}</Text>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(400)} style={styles.form}>
@@ -96,7 +93,7 @@ export default function PersonalDetailsScreen() {
                 maxLength={15}
               />
             </View>
-            <Text style={styles.hint}>This is used by agents for pickup coordination.</Text>
+            <Text style={styles.hint}>{t('phone_hint' as any)}</Text>
           </View>
 
           <TouchableOpacity 
@@ -108,7 +105,7 @@ export default function PersonalDetailsScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <>
-                <Text style={styles.buttonText}>Continue</Text>
+                <Text style={styles.buttonText}>{t('continue' as any)}</Text>
                 <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginLeft: 8 }} />
               </>
             )}
@@ -118,7 +115,7 @@ export default function PersonalDetailsScreen() {
             style={styles.signOutButton} 
             onPress={() => logout()}
           >
-            <Text style={styles.signOutText}>Sign Out</Text>
+            <Text style={styles.signOutText}>{t('sign_out' as any)}</Text>
           </TouchableOpacity>
         </Animated.View>
       </ScrollView>
@@ -155,12 +152,13 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 32,
-    fontWeight: '800',
+    fontFamily: Fonts.bold,
     color: LoopyColors.charcoal,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
+    fontFamily: Fonts.regular,
     color: '#6b7280',
     lineHeight: 24,
   },
@@ -172,7 +170,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: Fonts.bold,
     color: '#374151',
     marginLeft: 4,
   },
@@ -193,10 +191,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: LoopyColors.charcoal,
-    fontWeight: '500',
+    fontFamily: Fonts.medium,
   },
   hint: {
     fontSize: 12,
+    fontFamily: Fonts.regular,
     color: '#9ca3af',
     marginLeft: 4,
     marginTop: 4,
@@ -221,7 +220,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#ffffff',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: Fonts.bold,
   },
   signOutButton: {
     marginTop: 12,
@@ -231,7 +230,7 @@ const styles = StyleSheet.create({
   signOutText: {
     color: '#9ca3af',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Fonts.semiBold,
     textDecorationLine: 'underline',
   },
 });

@@ -3,6 +3,10 @@ import { db } from '@/lib/db';
 import { signToken } from '@/lib/jwt';
 import bcrypt from 'bcryptjs';
 
+export async function OPTIONS() {
+    return new NextResponse(null, { status: 204 });
+}
+
 export async function POST(request: Request) {
     try {
         const body = await request.json();

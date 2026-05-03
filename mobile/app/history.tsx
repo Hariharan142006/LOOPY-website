@@ -14,19 +14,42 @@ export default function HistoryScreen() {
   const [history, setHistory] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const LIMIT = 10;
 
   useEffect(() => {
-    fetchHistory();
+    fetchHistory(0);
   }, []);
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (skip: number = 0) => {
     try {
-      const response = await api.get('/api/user/bookings');
-      setHistory(response.data.bookings || []);
+      if (skip === 0) setLoading(true);
+      else setLoadingMore(true);
+
+      const response = await api.get(`/api/user/bookings?limit=${LIMIT}&skip=${skip}`);
+      const newBookings = response.data.bookings || [];
+      
+      if (skip === 0) {
+        setHistory(newBookings);
+      } else {
+        setHistory(prev => [...prev, ...newBookings]);
+      }
+      
+      if (newBookings.length < LIMIT) {
+        setHasMore(false);
+      }
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const loadMore = () => {
+    if (!loadingMore && hasMore) {
+      fetchHistory(history.length);
     }
   };
 
@@ -106,6 +129,14 @@ export default function HistoryScreen() {
               </View>
            </View>
 
+           {/* Estimated Value Display */}
+           {item.status !== 'COMPLETED' && (
+             <View style={styles.estimatedValueRow}>
+                <Text style={styles.estLabel}>ESTIMATED VALUE</Text>
+                <Text style={styles.estVal}>₹{(item.estimatedValue || 0).toFixed(2)}</Text>
+             </View>
+           )}
+
            <View style={styles.tagsRow}>
               {(item.items && item.items.length > 0) ? (
                  item.items.slice(0, 2).map((subItem: any, idx: number) => (
@@ -124,12 +155,19 @@ export default function HistoryScreen() {
 
            <View style={styles.cardDivider} />
 
-           <View style={styles.cardFooter}>
-              <Text style={[styles.footerActionText, { color: meta.color === '#6b7280' ? '#6b7280' : (meta.color === '#22c55e' ? '#111827' : meta.color) }]}>
-                 {meta.footer === 'Earned Credits' ? `Earned ${Math.floor(item.totalAmount || 120)} ECO Credits` : meta.footer}
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color="#d1d5db" />
-           </View>
+            <View style={styles.cardFooter}>
+               <View style={{ flex: 1 }}>
+                  <Text style={[styles.footerActionText, { color: meta.color === '#6b7280' ? '#6b7280' : (meta.color === '#22c55e' ? '#111827' : meta.color) }]}>
+                     {meta.footer === 'Earned Credits' ? `Earned ${Math.floor(item.totalAmount || 120)} ECO Credits` : meta.footer}
+                  </Text>
+                  {item.agent && (
+                    <Text style={styles.agentInfoSub}>
+                      {item.agent.name} • {item.agent.vehicleType || 'Professional'}
+                    </Text>
+                  )}
+               </View>
+               <Ionicons name="chevron-forward" size={16} color="#d1d5db" />
+            </View>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -138,7 +176,7 @@ export default function HistoryScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <View style={styles.searchContainer}>
@@ -171,9 +209,17 @@ export default function HistoryScreen() {
           ))
         )}
 
-        {filteredHistory.length > 0 && (
-          <TouchableOpacity style={styles.loadMoreBtn}>
-             <Text style={styles.loadMoreText}>LOAD OLDER RECORDS</Text>
+        {filteredHistory.length > 0 && hasMore && (
+          <TouchableOpacity 
+            style={[styles.loadMoreBtn, loadingMore && { opacity: 0.7 }]} 
+            onPress={loadMore}
+            disabled={loadingMore}
+          >
+             {loadingMore ? (
+               <ActivityIndicator size="small" color="#166534" />
+             ) : (
+               <Text style={styles.loadMoreText}>LOAD OLDER RECORDS</Text>
+             )}
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -224,6 +270,12 @@ const styles = StyleSheet.create({
   
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   footerActionText: { fontSize: 13, fontFamily: Fonts.bold },
+  agentInfoSub: { fontSize: 11, fontFamily: Fonts.medium, color: '#9ca3af', marginTop: 2 },
+
+  // Estimated Value
+  estimatedValueRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fdf2f8', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, marginBottom: 16 },
+  estLabel: { fontSize: 9, fontFamily: Fonts.bold, color: '#db2777' },
+  estVal: { fontSize: 14, fontFamily: Fonts.bold, color: '#db2777' },
 
   // Helpers
   loadMoreBtn: { backgroundColor: '#f3f4f6', paddingVertical: 14, borderRadius: 100, alignItems: 'center', marginTop: 12 },

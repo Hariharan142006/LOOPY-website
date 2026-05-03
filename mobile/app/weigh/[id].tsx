@@ -12,7 +12,8 @@ import {
     Dimensions,
     KeyboardAvoidingView,
     Platform,
-    StatusBar
+    StatusBar,
+    Vibration
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -20,6 +21,7 @@ import { api } from '../../utils/api';
 import { LoopyColors } from '../../constants/colors';
 import { Fonts } from '../../constants/typography';
 import { launchCamera } from 'react-native-image-picker';
+import { useTranslation } from '../../hooks/useTranslation';
 import { Camera, useCameraDevice, useCodeScanner, type CameraProps } from 'react-native-vision-camera';
 import Animated, { 
     FadeIn, 
@@ -47,6 +49,7 @@ const CATEGORY_ICONS: any = {
 export default function WeighingScreen() {
     const route = useRoute<any>(); const id = route.params?.id;
     const navigation = useNavigation<any>();
+    const { t } = useTranslation();
 
     const [booking, setBooking] = useState<any>(null);
     const [scrapItems, setScrapItems] = useState<any[]>([]);
@@ -78,7 +81,7 @@ export default function WeighingScreen() {
                 const allItems = (catsRes.data.categories || []).flatMap((c: any) => c.items || []);
                 setScrapItems(allItems);
              } catch (e: any) {
-                Alert.alert('Load Failure', 'Could not fetch data for this pickup.');
+                Alert.alert(t('error'), t('fetch_failure' as any));
              } finally {
                 setLoading(false);
              }
@@ -116,14 +119,28 @@ export default function WeighingScreen() {
     };
 
     const takePhoto = async () => {
-        const result: any = await launchCamera({
-            mediaType: 'photo',
-            quality: 0.6,
-            saveToPhotos: false
-        });
-        
-        if (result.assets && result.assets.length > 0) {
-            setPhotos([...photos, result.assets[0].uri]);
+        try {
+            const status = await Camera.getCameraPermissionStatus();
+            if (status !== 'granted') {
+                const newStatus = await Camera.requestCameraPermission();
+                if (newStatus !== 'granted') {
+                    Alert.alert('Permission needed', 'We need camera access to take verification proofs.');
+                    return;
+                }
+            }
+            
+            const result: any = await launchCamera({
+                mediaType: 'photo',
+                quality: 0.6,
+                saveToPhotos: false
+            });
+            
+            if (result.assets && result.assets.length > 0) {
+                setPhotos([...photos, result.assets[0].uri]);
+            }
+        } catch (e) {
+            console.log('Photo error:', e);
+            Alert.alert('Error', 'Failed to launch camera');
         }
     };
 
@@ -140,25 +157,45 @@ export default function WeighingScreen() {
         processPayment(data);
     };
 
-    const processPayment = async (customerWalletId: string) => {
+    const processPayment = async (scannedData: string) => {
         if (selectedItems.length === 0) {
-            Alert.alert('No Items', 'Please add items first.');
+            Alert.alert(t('error'), t('no_items_added' as any));
             return;
         }
+
+        // --- NEW FRONTEND VALIDATION ---
+        let scannedUserId = scannedData;
+        try {
+            const parsed = JSON.parse(scannedData);
+            if (parsed.userId) scannedUserId = parsed.userId;
+        } catch (e) {
+            scannedUserId = scannedData;
+        }
+
+        if (scannedUserId !== booking?.userId) {
+            Alert.alert(
+                t('error'), 
+                "Incorrect QR Scanned. This QR does not belong to " + (booking?.user?.name || "this customer") + ". Please scan the correct customer wallet QR."
+            );
+            return;
+        }
+        // -------------------------------
+
         try {
             setLoading(true);
             await api.post(`/api/bookings/${id}/pay`, {
                 items: selectedItems,
                 photos,
                 totalAmount: totalToPay,
-                customerWalletId
+                customerWalletId: scannedData
             });
             setPaymentSuccess(true);
+            Vibration.vibrate([0, 100, 50, 100]); // Success vibration pattern
             setTimeout(() => {
                 navigation.replace('Main');
             }, 3500);
         } catch (e: any) {
-            Alert.alert('Payment Failed', e.response?.data?.error || 'System error');
+            Alert.alert(t('error'), e.response?.data?.error || t('system_error' as any));
         } finally {
             setLoading(false);
         }
@@ -184,9 +221,9 @@ export default function WeighingScreen() {
                 <Animated.View entering={FadeIn} style={styles.successCircle}>
                     <Ionicons name="checkmark" size={60} color="#fff" />
                 </Animated.View>
-                <Text style={styles.successTitle}>Payment Successful!</Text>
+                <Text style={styles.successTitle}>{t('payment_success' as any)}</Text>
                 <Text style={styles.successSub}>
-                    Payout of <Text style={{fontWeight: '900', color: '#111827'}}>₹{totalToPay.toFixed(2)}</Text> completed.
+                    {t('payout_of' as any)} <Text style={{fontWeight: '900', color: '#111827'}}>₹{totalToPay.toFixed(2)}</Text> {t('completed')}.
                 </Text>
             </View>
         );
@@ -205,7 +242,7 @@ export default function WeighingScreen() {
                 )}
                 <View style={styles.scannerOverlay}>
                     <View style={styles.scannerHole} />
-                    <Text style={styles.scannerText}>Scan Customer Wallet QR</Text>
+                    <Text style={styles.scannerText}>{t('scan_customer_qr' as any)}</Text>
                 </View>
                 <TouchableOpacity style={styles.closeScanner} onPress={() => setShowScanner(false)}>
                     <Ionicons name="close-circle" size={48} color="#fff" />
@@ -218,26 +255,27 @@ export default function WeighingScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             <StatusBar barStyle="dark-content" />
             <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
                 style={{ flex: 1 }}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
                 <ScrollView 
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 }}
+                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 220 }}
                     keyboardShouldPersistTaps="handled"
                 >
                     <View style={styles.header}>
                         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                             <Ionicons name="chevron-back" size={24} color="#111827" />
                         </TouchableOpacity>
-                        <Text style={styles.headerTitle}>Order Pipeline</Text>
+                        <Text style={styles.headerTitle}>{t('order_pipeline' as any)}</Text>
                         <View style={{ width: 44 }} />
                     </View>
 
                     <View style={styles.topCard}>
                         <View style={styles.topCardHeader}>
                             <View>
-                                <Text style={styles.briefLabel}>PICKUP AGENT VIEW</Text>
+                                <Text style={styles.briefLabel}>{t('pickup_agent_view' as any)}</Text>
                                 <Text style={styles.briefName}>{booking?.user?.name}</Text>
                             </View>
                             <View style={styles.userAvatar}>
@@ -251,17 +289,17 @@ export default function WeighingScreen() {
                     </View>
 
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Calculated Weights</Text>
+                        <Text style={styles.sectionTitle}>{t('calculated_weights' as any)}</Text>
                         <TouchableOpacity style={styles.addBtnPill} onPress={handleAddItem}>
                             <Ionicons name="add" size={18} color="#fff" />
-                            <Text style={styles.addBtnPillText}>New Item</Text>
+                            <Text style={styles.addBtnPillText}>{t('new_item' as any)}</Text>
                         </TouchableOpacity>
                     </View>
 
                     {selectedItems.length === 0 ? (
                         <View style={styles.emptyItemsBox}>
                             <Ionicons name="scale-outline" size={48} color="#e5e7eb" />
-                            <Text style={styles.emptyText}>Add scrap items to start weighing</Text>
+                            <Text style={styles.emptyText}>{t('add_scrap_to_weigh' as any)}</Text>
                         </View>
                     ) : (
                         selectedItems.map((item, index) => (
@@ -320,7 +358,7 @@ export default function WeighingScreen() {
                     )}
 
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Verification Proofs</Text>
+                        <Text style={styles.sectionTitle}>{t('verification_proofs' as any)}</Text>
                         <Text style={styles.photoCount}>{photos.length}/5</Text>
                     </View>
 
@@ -336,7 +374,7 @@ export default function WeighingScreen() {
                         {photos.length < 5 && (
                             <TouchableOpacity style={styles.photoTrigger} onPress={takePhoto}>
                                 <Ionicons name="camera" size={32} color="#9ca3af" />
-                                <Text style={styles.triggerText}>Add Photo</Text>
+                                <Text style={styles.triggerText}>{t('add_photo' as any)}</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -358,7 +396,7 @@ export default function WeighingScreen() {
                     ) : (
                         <>
                             <Ionicons name="qr-code" size={20} color="#fff" />
-                            <Text style={styles.payoutBtnText}>Scan Customer Wallet</Text>
+                            <Text style={styles.payoutBtnText}>{t('scan_customer_wallet' as any)}</Text>
                         </>
                     )}
                 </TouchableOpacity>

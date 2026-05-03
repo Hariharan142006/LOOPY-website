@@ -1,13 +1,31 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, ScrollView, Dimensions, Alert, StatusBar, Image } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  ActivityIndicator, 
+  RefreshControl, 
+  TouchableOpacity, 
+  ScrollView, 
+  Dimensions, 
+  Alert, 
+  StatusBar, 
+  Image,
+  Modal,
+  PermissionsAndroid, 
+  Platform, 
+  Linking 
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { FadeInUp, FadeInRight, FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInUp, FadeInRight, FadeInDown, useSharedValue, withTiming, runOnJS, useAnimatedStyle } from 'react-native-reanimated';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../utils/api';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+// @ts-ignore
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import Geolocation from 'react-native-geolocation-service';
-import { PermissionsAndroid, Platform } from 'react-native';
+import Geolocation from '@react-native-community/geolocation';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import { LoopyColors } from '../../constants/colors';
 import { Fonts } from '../../constants/typography';
@@ -15,6 +33,7 @@ import { Spacing, BorderRadius } from '../../constants/layout';
 import { useTranslation } from '../../hooks/useTranslation';
 import InAppTutorial, { TutorialStep } from '../../components/InAppTutorial';
 import { useRoute } from '@react-navigation/native';
+import AnimatedTruck from '../../components/AnimatedTruck';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -28,6 +47,12 @@ export default function DashboardScreen() {
   const [wallet, setWallet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
+  const [recentBookings, setRecentBookings] = useState<any[]>([]);
+
+  const handleTruckPress = () => {
+    navigation.navigate('Book');
+  };
 
   // Tutorial State
   const [showTutorial, setShowTutorial] = useState(params.startTutorial === 'true');
@@ -105,17 +130,20 @@ export default function DashboardScreen() {
   const fetchData = async () => {
     try {
       const endpoints = isAgent 
-        ? [api.get('/api/agent/tasks')] 
-        : [api.get('/api/user/bookings'), api.get('/api/user/wallet')];
+        ? [api.post('/api/agent/tasks', { lat: user?.currentLat, lng: user?.currentLng }, { timeout: 10000 }), api.get('/api/notifications')] 
+        : [api.get('/api/user/wallet'), api.get('/api/notifications'), api.get('/api/user/bookings?limit=5')];
 
       const responses = await Promise.all(endpoints);
       
       if (isAgent) {
         setData(responses[0].data);
       } else {
-        setData(responses[0].data.bookings || []);
-        setWallet(responses[1].data || null);
+        setWallet(responses[0].data || null);
+        setRecentBookings(responses[2]?.data?.bookings || []);
       }
+
+      const notifs = responses[1]?.data?.notifications || [];
+      setHasUnread(notifs.some((n: any) => !n.isRead));
     } catch (error) {
       console.log('Error fetching dashboard data', error);
     } finally {
@@ -126,29 +154,28 @@ export default function DashboardScreen() {
 
   useFocusEffect(
     useCallback(() => {
+        setLoading(true);
         fetchData();
-    }, [])
+    }, [isAgent])
   );
 
   useEffect(() => {
-    const interval = setInterval(fetchData, 30000); // 30s polling
+    const interval = setInterval(fetchData, 60000); // 60s polling (optimized from 30s)
 
     let watchId: number | null = null;
     if (isAgent) {
         (async () => {
             let hasPermission = false;
-            if (Platform.OS === 'ios') {
-                const auth = await Geolocation.requestAuthorization('whenInUse');
-                hasPermission = auth === 'granted';
-            } else {
-                const granted = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-                );
-                hasPermission = granted === PermissionsAndroid.RESULTS.GRANTED;
-            }
+            const granted = await PermissionsAndroid.requestMultiple([
+                PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+            ]);
+            hasPermission = 
+                granted[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED ||
+                granted[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED;
 
             if (hasPermission) {
-                watchId = Geolocation.watchPosition(
+                watchId = Geolocation?.watchPosition ? Geolocation.watchPosition(
                     (location) => {
                         api.post('/api/agent/location', {
                             lat: location.coords.latitude,
@@ -156,11 +183,17 @@ export default function DashboardScreen() {
                         }).catch(console.log);
                     },
                     (error) => console.log(error),
-                    { enableHighAccuracy: true, distanceFilter: 50, interval: 30000 }
-                );
+                    { 
+                      enableHighAccuracy: true, 
+                      distanceFilter: 50, 
+                      interval: 30000,
+                      fastestInterval: 10000,
+                    }
+                ) : null;
             }
         })();
     }
+
 
     return () => {
         clearInterval(interval);
@@ -174,16 +207,36 @@ export default function DashboardScreen() {
   };
 
   const handleTaskAction = async (bookingId: string, action: 'ACCEPT' | 'STATUS', status?: string) => {
+    setLoading(true);
     try {
-      await api.post('/api/agent/tasks/update', { bookingId, action, status });
-      fetchData();
-      if (action === 'ACCEPT') Alert.alert('Success', 'Pickup accepted!');
+      const res = await api.post('/api/agent/tasks/update', { bookingId, action, status });
+      if (res.data.success) {
+        if (action === 'ACCEPT') Alert.alert('Success', 'Pickup accepted!');
+        await fetchData();
+      } else {
+        Alert.alert('Notice', res.data.error || 'Could not complete action');
+      }
     } catch (e: any) {
       Alert.alert('Error', e.response?.data?.error || 'Failed to update task');
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (loading) {
+  const [isOnline, setIsOnline] = useState(true);
+
+  const toggleDutyStatus = async () => {
+    const newStatus = !isOnline;
+    setIsOnline(newStatus);
+    try {
+      await api.post('/api/agent/status', { isOnline: newStatus });
+    } catch (e) {
+      setIsOnline(!newStatus);
+      Alert.alert('Error', 'Failed to update duty status');
+    }
+  };
+
+  if (loading || !user) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={LoopyColors.green} />
@@ -198,7 +251,7 @@ export default function DashboardScreen() {
       <ScrollView 
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={LoopyColors.green} />}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: 150 }}
       >
         <View style={styles.agentHeaderTop}>
             <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -209,69 +262,121 @@ export default function DashboardScreen() {
                    />
                 </TouchableOpacity>
                 <View style={{marginLeft: 12}}>
-                    <Text style={styles.agentPortalText}>Agent Portal</Text>
-                    <Text style={styles.agentHelloText}>Hello, {user?.name ? user.name.split(' ')[0] : 'Agent'}</Text>
+                    <Text style={styles.agentPortalTextTitle}>{t('agent_portal')}</Text>
+                    <View style={styles.onlineStatusRow}>
+                       <Text style={styles.onlineStatusText}>{isOnline ? 'ONLINE' : 'OFFLINE'}</Text>
+                    </View>
                 </View>
             </View>
-            <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={styles.notifBtnGray}>
-               <Ionicons name="notifications" size={20} color="#6b7280" />
+            <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={styles.notifBtnTransparent}>
+                <Ionicons name="notifications-outline" size={24} color="#111827" />
+                {hasUnread && <View style={[styles.unreadBadge, { top: 2, right: 2 }]} />}
             </TouchableOpacity>
         </View>
 
         <View style={styles.agentStatsWrapper}>
-           <Animated.View entering={FadeInUp.delay(100).springify().damping(15)} style={styles.earningsCardFull}>
-              <Text style={styles.statLabelTop}>TODAY'S EARNINGS</Text>
-              <View style={{flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 4}}>
-                 <Text style={styles.earningsValBig}>₹{(data?.summary?.todayEarnings || 0).toFixed(0)}</Text>
-                 <Text style={styles.earningsTrend}>+12%</Text>
-              </View>
-           </Animated.View>
-           <View style={styles.statsRowGrid}>
-              <Animated.View entering={FadeInUp.delay(200).springify().damping(15)} style={styles.statCardHalf}>
-                 <Text style={styles.statLabelTop}>PICKUPS</Text>
-                 <Text style={styles.statValBig}>{data?.summary?.todayCompleted || 0}</Text>
-              </Animated.View>
-              <Animated.View entering={FadeInUp.delay(300).springify().damping(15)} style={styles.statCardHalf}>
-                 <Text style={styles.statLabelTop}>QUEUED</Text>
-                 <Text style={styles.statValBig}>{data?.summary?.assignedCount || 0}</Text>
-              </Animated.View>
-           </View>
-        </View>
-
-        <View style={styles.agentSection}>
-           <View style={styles.sectionHeaderRow}>
-               <View>
-                 <Text style={styles.activeQueueTitle}>Active Queue</Text>
-                 <Text style={styles.activeQueueSub}>Manage your current recycling tasks</Text>
+            <View style={styles.earningsCardDesign}>
+               <View style={styles.earningsHeaderRow}>
+                  <Text style={styles.statLabelTopGrey}>{t('todays_earnings')}</Text>
+                  <View style={styles.trendBadgeGreen}>
+                     <Ionicons name="trending-up" size={12} color="#10b981" />
+                     <Text style={styles.trendBadgeText}>+15%</Text>
+                  </View>
                </View>
-               <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'pickups' })} style={styles.viewMapBadgeGray}>
-                    <Ionicons name="map" size={12} color={LoopyColors.charcoal} />
-                    <Text style={styles.viewMapTextGray}>Map</Text>
+               <Text style={styles.earningsValLarge}>₹{(data?.summary?.todayEarnings || 4850).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+               
+               <View style={styles.targetProgressContainer}>
+                  <View style={styles.targetLabelRow}>
+                    <Text style={styles.targetLabelText}>Daily Target</Text>
+                    <Text style={styles.targetValueText}>₹6,000.00</Text>
+                  </View>
+                  <View style={styles.targetTrack}>
+                     <View style={[styles.targetFill, { width: '65%' }]} />
+                  </View>
+               </View>
+            </View>
+
+            <View style={styles.statsRowGridDesign}>
+               <View style={styles.statCardFullDesign}>
+                  <View style={styles.statIconBox}>
+                     <Ionicons name="bus-outline" size={24} color="#059669" />
+                  </View>
+                  <Text style={styles.statValueBig}>{data?.summary?.todayCompleted ?? 24}</Text>
+                  <Text style={styles.statLabelSmall}>PICKUPS</Text>
+               </View>
+               <View style={styles.statCardFullDesign}>
+                  <View style={styles.statIconBox}>
+                     <Ionicons name="time-outline" size={24} color="#059669" />
+                  </View>
+                  <Text style={styles.statValueBig}>{data?.accepted?.length ?? '08'}</Text>
+                  <Text style={styles.statLabelSmall}>QUEUED</Text>
+               </View>
+            </View>
+         </View>
+
+         {/* Quick Actions Section */}
+         <View style={styles.quickActionsAgentSection}>
+            <Text style={styles.sectionHeadingTitle}>Quick Actions</Text>
+            <View style={styles.agentActionsGridDesign}>
+               <TouchableOpacity style={styles.agentActionItemDesign} onPress={() => Alert.alert('Coming Soon', 'QR Scanner will be available in v1.2')}>
+                  <View style={[styles.actionIconCircleDesign, { backgroundColor: '#f0fdf4' }]}>
+                     <Ionicons name="qr-code-outline" size={24} color="#059669" />
+                  </View>
+                  <Text style={styles.actionItemLabelDesign}>Scan QR</Text>
                </TouchableOpacity>
-           </View>
+               <TouchableOpacity style={styles.agentActionItemDesign} onPress={() => navigation.navigate('Rates')}>
+                  <View style={[styles.actionIconCircleDesign, { backgroundColor: '#f0fdf4' }]}>
+                     <Text style={{ fontSize: 24, color: '#059669', fontFamily: Fonts.bold }}>₹</Text>
+                  </View>
+                  <Text style={styles.actionItemLabelDesign}>Daily Rates</Text>
+               </TouchableOpacity>
+               <TouchableOpacity style={styles.agentActionItemDesign} onPress={() => navigation.navigate('Main', { screen: 'pickups' })}>
+                  <View style={[styles.actionIconCircleDesign, { backgroundColor: '#f0fdf4' }]}>
+                     <Ionicons name="map-outline" size={24} color="#059669" />
+                  </View>
+                  <Text style={styles.actionItemLabelDesign}>Route Map</Text>
+               </TouchableOpacity>
+               <TouchableOpacity style={styles.agentActionItemDesign} onPress={() => navigation.navigate('Notifications')}>
+                  <View style={[styles.actionIconCircleDesign, { backgroundColor: '#f0fdf4' }]}>
+                     <Ionicons name="headset-outline" size={24} color="#059669" />
+                  </View>
+                  <Text style={styles.actionItemLabelDesign}>Support</Text>
+               </TouchableOpacity>
+            </View>
+         </View>
+
+        <View style={styles.agentSectionActive}>
+           <Text style={styles.sectionHeadingTitle}>Active Queue</Text>
+           <Text style={styles.sectionSubHeading}>Manage your current recycling tasks</Text>
            
            {(!data?.accepted || data.accepted.length === 0) ? (
-               <View style={styles.emptyCard}>
-                   <Ionicons name="bicycle-outline" size={40} color="#e5e7eb" />
-                   <Text style={styles.emptyCardText}>No active tasks</Text>
+               <View style={styles.emptyActiveCardDashed}>
+                   <View style={styles.emptyIconCircleBlue}>
+                      <Ionicons name="cube-outline" size={32} color="#4f46e5" />
+                   </View>
+                   <Text style={styles.emptyActiveTitle}>No active tasks right now</Text>
+                   <Text style={styles.emptyActiveSub}>New requests will appear here when assigned.</Text>
+                   <TouchableOpacity style={styles.refreshQueueBtn} onPress={onRefresh} activeOpacity={0.7}>
+                       {refreshing ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.refreshQueueBtnText}>Refresh Queue</Text>}
+                   </TouchableOpacity>
                </View>
            ) : (
-               <Animated.View entering={FadeInUp.delay(400).springify().damping(14)} style={styles.mainActiveCard}>
+               <View style={styles.mainActiveCard}>
                    <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Main', { screen: 'pickups' })}>
                        <View style={styles.mapBackdrop}>
-                           <MapView 
-                               style={StyleSheet.absoluteFillObject}
-                               provider={PROVIDER_DEFAULT}
-                               initialRegion={{
-                                   latitude: data.accepted?.[0]?.pickupLat || 21.1458,
-                                   longitude: data.accepted?.[0]?.pickupLng || 79.0882,
-                                   latitudeDelta: 0.02,
-                                   longitudeDelta: 0.02,
-                               }}
-                               scrollEnabled={false}
-                               zoomEnabled={false}
-                               pitchEnabled={false}
-                           >
+                               <MapView 
+                                   style={StyleSheet.absoluteFillObject}
+                                   provider={PROVIDER_DEFAULT}
+                                   region={{
+                                       latitude: data.accepted?.[0]?.pickupLat || 21.1458,
+                                       longitude: data.accepted?.[0]?.pickupLng || 79.0882,
+                                       latitudeDelta: 0.02,
+                                       longitudeDelta: 0.02,
+                                   }}
+                                   scrollEnabled={false}
+                                   zoomEnabled={false}
+                                   pitchEnabled={false}
+                               >
                                {data.accepted?.[0] && (
                                  <Marker coordinate={{ latitude: data.accepted[0].pickupLat || 21.1458, longitude: data.accepted[0].pickupLng || 79.0882 }} />
                                )}
@@ -283,18 +388,45 @@ export default function DashboardScreen() {
                        </View>
                        <View style={styles.activeQueueInfo}>
                            <View style={styles.activeQueueHeaderRow}>
-                               <View>
-                                   <Text style={styles.aqName}>{data.accepted[0].user?.name || 'Customer'}</Text>
+                               <View style={{ flex: 1 }}>
+                                   <Text style={styles.aqName}>{data?.accepted?.[0]?.user?.name || 'Customer'}</Text>
                                    <View style={styles.aqAddressRow}>
                                        <Ionicons name="home" size={12} color="#9ca3af" />
-                                       <Text style={styles.aqAddress}>{data.accepted[0].address?.street || 'Unknown Address'}</Text>
+                                       <Text style={styles.aqAddress} numberOfLines={1}>{data?.accepted?.[0]?.address?.street || 'Unknown Address'}</Text>
                                    </View>
                                </View>
                                <View style={{alignItems: 'flex-end'}}>
-                                   <Text style={styles.aqScheduledLabel}>SCHEDULED</Text>
-                                   <Text style={styles.aqTime}>{new Date(data.accepted[0].scheduledAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-                               </View>
-                           </View>
+                                    <Text style={styles.aqScheduledLabel}>EST. PAYOUT</Text>
+                                    <Text style={[styles.aqTime, { color: '#10b981' }]}>₹{(data?.accepted?.[0]?.estimatedValue || 0).toFixed(2)}</Text>
+                                </View>
+                            </View>
+
+                            {/* Dynamic Material Tags */}
+                            <View style={styles.materialTagsRow}>
+                                {(data?.accepted?.[0]?.items || []).slice(0, 3).map((item: any, i: number) => (
+                                    <View key={i} style={styles.materialTag}>
+                                        <Text style={styles.materialTagText}>{item?.item?.name || 'Item'}</Text>
+                                    </View>
+                                ))}
+                                {(data?.accepted?.[0]?.items?.length || 0) > 3 && (
+                                    <View style={styles.materialTagMore}>
+                                        <Text style={styles.materialTagText}>+{(data?.accepted?.[0]?.items?.length || 0) - 3}</Text>
+                                    </View>
+                                )}
+                            </View>
+
+                            <View style={styles.aqDivider} />
+
+                            <View style={styles.aqScheduleInfoRow}>
+                                <View style={styles.aqInfoItem}>
+                                    <Ionicons name="time-outline" size={14} color="#6b7280" />
+                                    <Text style={styles.aqInfoText}>{new Date(data?.accepted?.[0]?.scheduledAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                                </View>
+                                <View style={styles.aqInfoItem}>
+                                    <Ionicons name="calendar-outline" size={14} color="#6b7280" />
+                                    <Text style={styles.aqInfoText}>{new Date(data?.accepted?.[0]?.scheduledAt || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</Text>
+                                </View>
+                            </View>
                            <View style={styles.aqActionRow}>
                                <TouchableOpacity 
                                    style={styles.aqPrimaryBtn} 
@@ -312,18 +444,21 @@ export default function DashboardScreen() {
                                    />
                                    <Text style={styles.aqPrimaryBtnText}>
                                       {
-                                        data.accepted[0].status === 'ARRIVED' ? "Resume Weighing" : 
-                                        data.accepted[0].status === 'ONEWAY' ? "Resume Route" : "Start Route"
+                                        data.accepted[0].status === 'ARRIVED' ? t('resume_weighing') : 
+                                        data.accepted[0].status === 'ONEWAY' ? t('resume_route') : t('start_route')
                                       }
                                    </Text>
                                </TouchableOpacity>
-                               <TouchableOpacity style={styles.aqCallBtn}>
+                               <TouchableOpacity 
+                                   style={styles.aqCallBtn} 
+                                   onPress={() => Linking.openURL(`tel:${data?.accepted?.[0]?.user?.phone}`)}
+                               >
                                    <Ionicons name="call" size={20} color="#15803d" />
                                </TouchableOpacity>
                            </View>
                        </View>
                    </TouchableOpacity>
-               </Animated.View>
+               </View>
            )}
         </View>
 
@@ -331,43 +466,53 @@ export default function DashboardScreen() {
              <View style={styles.agentSection}>
                 <View style={styles.sectionHeaderRow}>
                     <View>
-                        <Text style={styles.activeQueueTitle}>Available Pickups</Text>
-                        <Text style={styles.activeQueueSub}>Nearby tasks you can accept</Text>
+                        <Text style={styles.activeQueueTitle}>{t('available_pickups')}</Text>
+                        <Text style={styles.activeQueueSub}>{t('available_pickups_sub')}</Text>
                     </View>
                 </View>
                 <View style={{ gap: 12, marginTop: 12 }}>
-                    {data.available.map((item: any, idx: number) => (
-                        <Animated.View key={item.id} entering={FadeInUp.delay(600 + (idx * 100))} style={styles.availableTaskCard}>
+                    {data?.available?.map((item: any) => (
+                        <View key={item?.id || Math.random().toString()} style={styles.availableTaskCard}>
                             <View style={styles.availableHeader}>
                                 <View style={styles.availableDistBadge}>
                                     <Ionicons name="location" size={12} color="#15803d" />
-                                    <Text style={styles.availableDistText}>{(item.distance || 0).toFixed(1)} km away</Text>
+                                    <Text style={styles.availableDistText}>{(item?.distance || 0).toFixed(1)} km away</Text>
                                 </View>
-                                <Text style={styles.availablePayout}>₹{(item.totalAmount || 0).toFixed(0)}</Text>
+                                <Text style={styles.availablePayout}>₹{(item?.totalAmount || 0).toFixed(0)}</Text>
                             </View>
-                            <Text style={styles.availableName}>{item.user?.name || 'Customer'}</Text>
-                            <Text style={styles.availableAddr} numberOfLines={1}>{item.address?.street || 'No address'}</Text>
+                            <Text style={styles.availableName}>{item?.user?.name || 'Customer'}</Text>
+                            <Text style={styles.availableAddr} numberOfLines={1}>{item?.address?.street || 'No address'}</Text>
+                            
+                            {/* Materials Preview */}
+                            <View style={[styles.materialTagsRow, { marginTop: 8, marginBottom: 8 }]}>
+                                {(item?.items || []).slice(0, 3).map((scrap: any, i: number) => (
+                                    <View key={i} style={[styles.materialTag, { paddingVertical: 2, paddingHorizontal: 8 }]}>
+                                        <Text style={[styles.materialTagText, { fontSize: 10 }]}>{scrap?.item?.name || 'Item'}</Text>
+                                    </View>
+                                ))}
+                            </View>
+
                             <View style={styles.availableFooter}>
                                 <View style={styles.availableTime}>
                                     <Ionicons name="time-outline" size={14} color="#6b7280" />
-                                    <Text style={styles.availableTimeText}>{new Date(item.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                                    <Text style={styles.availableTimeText}>{new Date(item?.scheduledAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                                 </View>
-                                <TouchableOpacity style={styles.acceptMiniBtn} onPress={() => handleTaskAction(item.id, 'ACCEPT')}>
-                                    <Text style={styles.acceptMiniBtnText}>Accept Task</Text>
+                                <TouchableOpacity style={styles.acceptMiniBtn} onPress={() => handleTaskAction(item?.id, 'ACCEPT')}>
+                                    <Text style={styles.acceptMiniBtnText}>{t('accept_task')}</Text>
                                 </TouchableOpacity>
                             </View>
-                        </Animated.View>
+                        </View>
                     ))}
                 </View>
              </View>
          )}
 
         {data?.accepted && data.accepted.length > 1 && (
-            <Animated.View entering={FadeInUp.delay(500).springify().damping(14)} style={styles.agentSection}>
-               <Text style={styles.upcomingLabel}>UPCOMING TODAY</Text>
+            <View style={styles.agentSection}>
+               <Text style={styles.upcomingLabel}>{t('upcoming_today')}</Text>
                <View style={styles.upcomingContainer}>
-                   {data.accepted.slice(1).map((item: any, idx: number) => (
-                       <Animated.View entering={FadeInRight.delay(600 + (idx * 100)).springify()} key={item.id} style={styles.upcomingPill}>
+                   {data.accepted.slice(1).map((item: any) => (
+                       <View key={item.id} style={styles.upcomingPill}>
                           <View style={styles.upcomingPillIcon}>
                               <Ionicons name="sync" size={16} color="#15803d" />
                           </View>
@@ -376,149 +521,173 @@ export default function DashboardScreen() {
                               <Text style={styles.upDetails}>{item.items?.length || 3} items • {new Date(item.scheduledAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
                           </View>
                           <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-                       </Animated.View>
+                       </View>
                    ))}
                </View>
-            </Animated.View>
+            </View>
         )}
       </ScrollView>
     </SafeAreaView>
+
   ) : (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" />
       <ScrollView 
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={LoopyColors.green} />}
-        contentContainerStyle={{ paddingBottom: 64 }}
+        contentContainerStyle={{ paddingBottom: 150 }}
       >
         <Animated.View entering={FadeInUp} style={styles.customerHeader}>
           <View style={styles.customerHeaderTopRow}>
             <TouchableOpacity style={styles.avatarHolder} onPress={() => navigation.navigate('Main', { screen: 'profile' })}>
-               <Image 
-                  source={user?.image ? { uri: user.image } : require('../../assets/images/user-placeholder.png')} 
-                  style={styles.avatarMini} 
-               />
+               {user?.image ? (
+                 <Image source={{ uri: user.image }} style={styles.avatarMini} />
+               ) : <Ionicons name="person" size={24} color="#9ca3af" />}
             </TouchableOpacity>
             <View style={{ flex: 1, paddingLeft: 16 }}>
-              <Text style={styles.welcomeBackText}>HELLO BACK</Text>
-              <Text style={styles.greetingHeader}>Hello, <Text style={styles.nameHeaderTeal}>{user?.name?.split(' ')[0] || 'Sk'}</Text></Text>
+              <Text style={styles.greetingHeader}>{t('greeting')}, <Text style={styles.nameHeaderTeal}>{user?.name?.split(' ')[0] || 'Sk'}</Text></Text>
+              <Text style={styles.subGreeting}>Manage your scrap pickups and track earnings.</Text>
             </View>
             <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={styles.notifBtnCircle}>
-               <Ionicons name="notifications" size={22} color="#059669" />
+               <Ionicons name="notifications-outline" size={22} color="#111827" />
+               {hasUnread && <View style={[styles.unreadBadge, { top: 12, right: 12 }]} />}
             </TouchableOpacity>
           </View>
         </Animated.View>
 
         <View style={{ paddingHorizontal: 24, gap: 20, marginBottom: 32 }}>
-           <Animated.View 
-            entering={FadeInRight.delay(200)} 
-            style={styles.walletCardFull}
-            ref={walletRef}
-           >
-              <Text style={styles.walletLabel}>WALLET BALANCE</Text>
-              <Text style={styles.walletBalanceText}>₹{(wallet?.balance || 24097.60).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-              <TouchableOpacity style={styles.cashOutBtnFull} onPress={() => navigation.navigate('Main', { screen: 'wallet' })}>
-                 <Ionicons name="cash" size={18} color="#065f46" style={{ marginRight: 8 }} />
-                 <Text style={styles.cashOutBtnTextFull}>Cash Out</Text>
+           {/* Animated Truck Card */}
+           <View ref={bookRef}>
+             <AnimatedTruck onPress={handleTruckPress} />
+           </View>
+
+           {/* Total Earnings Card */}
+           <Animated.View entering={FadeInUp.delay(300)} style={styles.earningsCardFull}>
+              <Text style={styles.earningsLabelTop}>TOTAL EARNINGS</Text>
+              <View style={styles.earningsRow}>
+                <Text style={styles.earningsValBigCustomer}>₹{(wallet?.balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              </View>
+              <TouchableOpacity style={styles.withdrawBtnFull} onPress={() => navigation.navigate('Withdraw')}>
+                 <Ionicons name="wallet-outline" size={20} color="#111827" style={{ marginRight: 8 }} />
+                 <Text style={styles.withdrawBtnTextFull}>Withdraw Funds</Text>
               </TouchableOpacity>
            </Animated.View>
 
-           <Animated.View 
-            entering={FadeInRight.delay(400)} 
-            style={styles.impactCardFull}
-            ref={impactRef}
-           >
-              <View style={styles.impactIconBg}><Ionicons name="leaf" size={18} color="#fff" /></View>
-              <Text style={styles.impactValBig}>{wallet?.impact?.kgRecycled || '524.1'}</Text>
-              <Text style={styles.impactSubWhite}>KG RECYCLED TOTAL</Text>
-              <Ionicons name="leaf" size={160} color="#15803d" style={styles.watermarkLeaf} />
+
+
+           {/* Schedule Pickup Card */}
+           <Animated.View entering={FadeInUp.delay(400)} style={styles.actionCardModern}>
+             <TouchableOpacity style={styles.actionCardInner} onPress={() => navigation.navigate('Book')}>
+               <View style={[styles.actionIconBox, { backgroundColor: '#eafff2' }]}>
+                 <Ionicons name="calendar-outline" size={22} color="#16a34a" />
+               </View>
+               <View style={{ flex: 1, paddingLeft: 16 }}>
+                 <Text style={styles.actionCardTitle}>Schedule Pickup</Text>
+                 <Text style={styles.actionCardSub}>Hassle-free doorstep service</Text>
+               </View>
+               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+             </TouchableOpacity>
+           </Animated.View>
+
+           {/* Check Rates Card */}
+           <Animated.View entering={FadeInUp.delay(500)} style={styles.actionCardModern}>
+             <TouchableOpacity style={styles.actionCardInner} onPress={() => navigation.navigate('Rates')}>
+               <View style={[styles.actionIconBox, { backgroundColor: '#eff6ff' }]}>
+                 <Ionicons name="trending-up-outline" size={22} color="#3b82f6" />
+               </View>
+               <View style={{ flex: 1, paddingLeft: 16 }}>
+                 <Text style={styles.actionCardTitle}>Check Rates</Text>
+                 <Text style={styles.actionCardSub}>Live market scrap prices</Text>
+               </View>
+               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+             </TouchableOpacity>
            </Animated.View>
         </View>
 
-        <View style={styles.quickActionsContainer}>
-           <Text style={styles.quickActionsTitle}>QUICK ACTIONS</Text>
-           <View style={styles.actionsGridCenter}>
-             <TouchableOpacity style={styles.actionItemBox} onPress={() => navigation.navigate('Book')} ref={bookRef}>
-                <View style={styles.actionCircleTeal}><Ionicons name="car" size={24} color="#fff" /></View>
-                <Text style={styles.actionTitleSmall}>Book Pickup</Text>
-             </TouchableOpacity>
-             <TouchableOpacity style={styles.actionItemBox} onPress={() => navigation.navigate('Rates')} ref={ratesRef}>
-                <View style={styles.actionCircleBlue}><Ionicons name="bar-chart" size={24} color="#0f172a" /></View>
-                <Text style={styles.actionTitleSmall}>Daily Rates</Text>
-             </TouchableOpacity>
-             <TouchableOpacity style={styles.actionItemBox} onPress={() => navigation.navigate('History')}>
-                <View style={styles.actionCircleGreen}><Ionicons name="time" size={24} color="#065f46" /></View>
-                <Text style={styles.actionTitleSmall}>History</Text>
-             </TouchableOpacity>
-           </View>
-        </View>
-
-        <View style={styles.activitySectionCustomer}>
+        {/* Recent Activity */}
+        <Animated.View entering={FadeInUp.delay(600)} style={styles.activitySectionCustomer}>
            <View style={styles.sectionHeaderRow}>
-               <View>
-                  <Text style={styles.sectionHeaderSmall}>RECENT ACTIVITY</Text>
-                  <Text style={styles.activitySubtitle}>Updated 2 mins ago</Text>
-               </View>
-               <TouchableOpacity onPress={() => navigation.navigate('History')}>
-                    <Text style={styles.seeAllTextGreen}>See All</Text>
-               </TouchableOpacity>
+              <Text style={styles.sectionHeader}>Recent Activity</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('History')}>
+                 <Text style={styles.seeAllTextGreen}>See All</Text>
+              </TouchableOpacity>
            </View>
+           
            <View style={styles.activityList}>
-              {(!wallet?.transactions || wallet.transactions.length === 0) ? (
+               {recentBookings.length === 0 ? (
                  <View style={styles.emptyCard}>
-                    <Ionicons name="receipt-outline" size={32} color={LoopyColors.border} />
-                    <Text style={styles.emptyCardText}>No recent activity</Text>
+                    <Ionicons name="receipt-outline" size={32} color="#e5e7eb" />
+                    <Text style={styles.emptyCardText}>No recent pickups found</Text>
                  </View>
-              ) : (
-                 wallet.transactions.slice(0, 3).map((item: any, idx: number) => (
-                    <Animated.View 
-                       key={item.id || idx.toString()} 
-                       entering={FadeInDown.delay(600 + (idx * 100))} 
-                       style={styles.activityCardPill}
-                    >
-                       <View style={styles.activityIconGrey}>
-                          <Ionicons 
-                             name={item.type === 'CREDIT' ? "cash" : "leaf"} 
-                             size={20} 
-                             color={LoopyColors.success} 
-                          />
-                       </View>
-                       <View style={styles.activityInfo}>
-                          <Text style={styles.activityTitleFull}>{item.description || 'Payout for Pickup #A5297R'}</Text>
-                          <Text style={styles.activityDateFull}>{item.type === 'CREDIT' ? 'Oct 24, 2023 • 2:30 PM' : 'Oct 22, 2023 • 10:15 AM'}</Text>
-                       </View>
-                       <View style={styles.activityAmountRight}>
-                          <Text style={styles.amountTextGreen}>
-                             {item.type === 'CREDIT' ? '+' : '-'} ₹{(item.amount || 0).toFixed(2)}
-                          </Text>
-                          <View style={styles.successBadge}>
-                             <Text style={styles.successBadgeText}>{item.type === 'CREDIT' ? 'SUCCESS' : 'LOGGED'}</Text>
-                          </View>
-                       </View>
-                    </Animated.View>
-                 ))
-              )}
-           </View>
-        </View>
-        
-        <View style={styles.promoContainer}>
-            <Animated.Image 
-               entering={FadeInUp.delay(800)}
-               source={require('../../assets/images/promo-bg.png')} 
-               style={styles.promoImage} 
-            />
-            <View style={styles.promoOverlay}>
-               <View>
-                 <Text style={styles.promoTitle}>Every gram counts</Text>
-                 <Text style={styles.promoSubtitle}>Invite friends to earn eco-bonuses.</Text>
-               </View>
-               <TouchableOpacity style={styles.referBtn}>
-                  <Text style={styles.referBtnText}>Refer Now</Text>
-               </TouchableOpacity>
+               ) : (
+                 recentBookings.map((item, idx) => {
+                   const date = new Date(item.scheduledAt);
+                   const formattedDate = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                   const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+                   return (
+                     <TouchableOpacity 
+                       key={item.id} 
+                       activeOpacity={0.9} 
+                       onPress={() => navigation.navigate('Track', { id: item.id })}
+                       style={styles.activityCardModern}
+                     >
+                        <View style={styles.activityCardHeader}>
+                           <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                 <Text style={styles.activityIdText}>#{item.id.slice(-8).toUpperCase()}</Text>
+                                 <View style={[styles.activityStatusBadge, item.status === 'COMPLETED' && { backgroundColor: '#eafff2' }]}>
+                                    <Text style={[styles.activityStatusText, item.status === 'COMPLETED' && { color: '#16a34a' }]}>{item.status}</Text>
+                                 </View>
+                              </View>
+                           </View>
+                           <View style={styles.activityEstValueCol}>
+                              <Text style={styles.activityEstValText}>
+                                 {item.status === 'COMPLETED' ? `₹${item.totalAmount || 0}` : (item.estimatedValue ? `₹${item.estimatedValue}` : '₹--')}
+                              </Text>
+                              <Text style={styles.activityEstLabel}>{item.status === 'COMPLETED' ? 'FINAL VALUE' : 'ESTIMATED VALUE'}</Text>
+                           </View>
+                        </View>
+
+                        <Text style={styles.activityDateTime}>{formattedDate} • {formattedTime}</Text>
+
+                        <View style={styles.activityTagsRow}>
+                           {item.items && item.items.length > 0 ? (
+                             item.items.map((sub: any, sIdx: number) => (
+                               <View key={sIdx} style={styles.activityTag}>
+                                  <Text style={styles.activityTagText}>{sub.type || 'Material'}</Text>
+                               </View>
+                             ))
+                           ) : (
+                             <View style={styles.activityTag}>
+                                <Text style={styles.activityTagText}>Material</Text>
+                             </View>
+                           )}
+                        </View>
+
+                        <View style={styles.activityFooterAgent}>
+                           <View style={styles.activityAgentIconBox}>
+                              <Ionicons name="bus" size={20} color="#16a34a" />
+                           </View>
+                           <View>
+                              <Text style={styles.activityAgentName}>
+                                 {item.agent ? item.agent.name : 'Assigning Agent'}
+                              </Text>
+                              <Text style={styles.activityAgentSub}>
+                                 {item.agent ? (item.agent.phone || 'Professional Rider') : 'Looking for nearby riders...'}
+                              </Text>
+                           </View>
+                        </View>
+                     </TouchableOpacity>
+                   );
+                 })
+               )}
             </View>
-        </View>
+        </Animated.View>
 
       </ScrollView>
+
+
 
       {/* Interactive Tutorial Overlay */}
       <InAppTutorial 
@@ -558,7 +727,7 @@ const styles = StyleSheet.create({
   cashOutBtnTextFull: { fontSize: 16, fontFamily: Fonts.bold, color: '#065f46' },
 
   // Impact
-  impactCardFull: { backgroundColor: '#14532d', borderRadius: 32, padding: 24, position: 'relative', overflow: 'hidden' },
+  impactCardFull: { backgroundColor: '#166534', borderRadius: 32, padding: 24, position: 'relative', overflow: 'hidden' },
   impactIconBg: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   impactValBig: { fontSize: 32, fontFamily: Fonts.bold, color: '#fff' },
   impactSubWhite: { fontSize: 10, fontFamily: Fonts.bold, color: 'rgba(255,255,255,0.7)', marginTop: 4, letterSpacing: 1 },
@@ -576,21 +745,40 @@ const styles = StyleSheet.create({
 
   // Activity
   activitySectionCustomer: { paddingHorizontal: 32, marginBottom: 40 },
-  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionHeader: { fontSize: 18, fontFamily: Fonts.bold, color: LoopyColors.charcoal, letterSpacing: -0.5 },
-  sectionHeaderSmall: { fontSize: 10, fontFamily: Fonts.bold, color: LoopyColors.grey, letterSpacing: 0.5 },
-  activitySubtitle: { fontSize: 14, fontFamily: Fonts.regular, color: '#6b7280', marginTop: 2 },
-  seeAllTextGreen: { fontSize: 14, fontFamily: Fonts.bold, color: LoopyColors.success },
+  seeAllTextGreen: { fontSize: 13, fontFamily: Fonts.bold, color: '#16a34a', backgroundColor: '#eafff2', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   activityList: { gap: 12 },
-  activityCardPill: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 24, marginBottom: 8 },
-  activityIconGrey: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
+  activityCardPill: { flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderRadius: 24, borderWidth: 1, borderColor: '#f3f4f6', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10, elevation: 2 },
+  activityIconBox: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   activityInfo: { flex: 1, marginLeft: 12 },
-  activityTitleFull: { fontSize: 14, fontFamily: Fonts.bold, color: LoopyColors.charcoal },
+  activityTitleFull: { fontSize: 15, fontFamily: Fonts.bold, color: LoopyColors.charcoal },
   activityDateFull: { fontSize: 12, fontFamily: Fonts.medium, color: LoopyColors.grey, marginTop: 2 },
   activityAmountRight: { alignItems: 'flex-end' },
-  amountTextGreen: { fontSize: 14, fontFamily: Fonts.bold, color: '#166534' },
-  successBadge: { backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 4 },
-  successBadgeText: { color: '#166534', fontSize: 8, fontFamily: Fonts.bold },
+  activityAmountDark: { fontSize: 16, fontFamily: Fonts.bold, color: '#111827' },
+  
+  // Dynamic Activity Card Styles
+  activityCardModern: { backgroundColor: '#fff', borderRadius: 32, padding: 24, marginBottom: 16, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.05, shadowRadius: 15 },
+  activityCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  activityIdText: { fontSize: 20, fontFamily: Fonts.bold, color: '#111827' },
+  activityStatusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: '#f1f5f9' },
+  activityStatusText: { fontSize: 10, fontFamily: Fonts.bold, color: '#475569', textTransform: 'uppercase' },
+  activityEstValueCol: { alignItems: 'flex-end' },
+  activityEstValText: { fontSize: 24, fontFamily: Fonts.bold, color: '#111827' },
+  activityEstLabel: { fontSize: 9, fontFamily: Fonts.bold, color: '#9ca3af', marginTop: 2, letterSpacing: 0.5 },
+  activityDateTime: { fontSize: 14, fontFamily: Fonts.medium, color: '#64748b', marginBottom: 20 },
+  activityTagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
+  activityTag: { backgroundColor: '#f8fafc', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: '#f1f5f9' },
+  activityTagText: { fontSize: 13, fontFamily: Fonts.bold, color: '#475569' },
+  activityFooterAgent: { backgroundColor: '#f8fafc', borderRadius: 24, padding: 16, flexDirection: 'row', alignItems: 'center' },
+  activityAgentIconBox: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#f0fdf4', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  activityAgentName: { fontSize: 15, fontFamily: Fonts.bold, color: '#111827' },
+  activityAgentSub: { fontSize: 12, fontFamily: Fonts.medium, color: '#64748b', marginTop: 2 },
+
+  statusPillSmallRed: { backgroundColor: '#ffe4e6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginTop: 4 },
+  statusPillSmallTextRed: { color: '#ef4444', fontSize: 8, fontFamily: Fonts.bold, letterSpacing: 0.5 },
+  statusPillSmallGreen: { backgroundColor: '#eafff2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginTop: 4 },
+  statusPillSmallTextGreen: { color: '#16a34a', fontSize: 8, fontFamily: Fonts.bold, letterSpacing: 0.5 },
   emptyCard: { alignItems: 'center', justifyContent: 'center', padding: 40, borderStyle: 'dashed', borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 28 },
   emptyCardText: { color: '#9ca3af', fontSize: 14, marginTop: 10, fontFamily: Fonts.bold },
 
@@ -621,6 +809,21 @@ const styles = StyleSheet.create({
   statValBig: { fontSize: 28, fontFamily: Fonts.bold, color: '#111827', marginTop: 8 },
 
   viewMapBadgeGray: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#e5e7eb', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+
+  dutyTogglePill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 100, gap: 6, borderWidth: 1 },
+  dutyOnline: { backgroundColor: '#ecfdf5', borderColor: '#10b981' },
+  dutyOffline: { backgroundColor: '#fef2f2', borderColor: '#ef4444' },
+  dutyDot: { width: 6, height: 6, borderRadius: 3 },
+  dutyToggleText: { fontSize: 10, fontFamily: Fonts.bold, letterSpacing: 0.5 },
+
+  agentActionsGrid: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 24, flexWrap: 'wrap', gap: 12 },
+  agentActionItem: { width: (SCREEN_WIDTH - 72) / 4, alignItems: 'center' },
+  actionIconCircle: { width: 50, height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  actionItemLabel: { fontSize: 11, fontFamily: Fonts.bold, color: '#4b5563', textAlign: 'center' },
+
+  emptyIconBg: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  emptyCardSub: { fontSize: 12, fontFamily: Fonts.medium, color: '#9ca3af', marginTop: 4, textAlign: 'center' },
+
   viewMapTextGray: { fontSize: 12, fontFamily: Fonts.bold, color: LoopyColors.charcoal },
   activeQueueTitle: { fontSize: 20, fontFamily: Fonts.bold, color: '#111827', letterSpacing: -0.5 },
   activeQueueSub: { fontSize: 12, fontFamily: Fonts.medium, color: '#6b7280', marginTop: 2 },
@@ -632,13 +835,23 @@ const styles = StyleSheet.create({
   
   activeQueueInfo: { padding: 24, backgroundColor: '#fff' },
   activeQueueHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  aqName: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827', marginBottom: 6 },
-  aqAddressRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  aqAddress: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280' },
-  aqScheduledLabel: { fontSize: 10, fontFamily: Fonts.bold, color: '#6b7280', letterSpacing: 0.5, marginBottom: 4 },
-  aqTime: { fontSize: 16, fontFamily: Fonts.bold, color: '#15803d' },
+  aqName: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827' },
+  aqAddressRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  aqAddress: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280', flex: 1 },
+  aqScheduledLabel: { fontSize: 9, fontFamily: Fonts.bold, color: '#9ca3af', letterSpacing: 1 },
+  aqTime: { fontSize: 16, fontFamily: Fonts.bold, color: '#111827', marginTop: 2 },
   
-  aqActionRow: { flexDirection: 'row', gap: 12 },
+  materialTagsRow: { flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' },
+  materialTag: { backgroundColor: '#f1f5f9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  materialTagMore: { backgroundColor: '#f8fafc', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderStyle: 'dashed', borderWidth: 1, borderColor: '#cbd5e1' },
+  materialTagText: { fontSize: 11, fontFamily: Fonts.bold, color: '#475569' },
+  
+  aqDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 16 },
+  aqScheduleInfoRow: { flexDirection: 'row', gap: 16 },
+  aqInfoItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  aqInfoText: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280' },
+
+  aqActionRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
   aqPrimaryBtn: { flex: 1, flexDirection: 'row', backgroundColor: '#15803d', paddingVertical: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', gap: 8 },
   aqPrimaryBtnText: { color: '#fff', fontFamily: Fonts.bold, fontSize: 16 },
   aqCallBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e5e7eb' },
@@ -665,4 +878,91 @@ const styles = StyleSheet.create({
   availableTimeText: { fontSize: 12, fontFamily: Fonts.medium, color: '#6b7280' },
   acceptMiniBtn: { backgroundColor: '#111827', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
   acceptMiniBtnText: { color: '#fff', fontSize: 12, fontFamily: Fonts.bold },
+
+  truckCard: { backgroundColor: '#fcfcfc', borderRadius: 24, height: 240, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', position: 'relative' },
+
+  earningsLabelTop: { fontSize: 12, fontFamily: Fonts.medium, color: '#6b7280', letterSpacing: 1.5, textAlign: 'center' },
+  earningsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginVertical: 20, gap: 12 },
+  earningsValBigCustomer: { fontSize: 48, fontFamily: Fonts.bold, color: '#111827', letterSpacing: -1.5, textAlign: 'center' },
+  earningsTrendBadge: { backgroundColor: '#dcfce7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
+  earningsTrendText: { fontSize: 11, fontFamily: Fonts.bold, color: '#166534' },
+  withdrawBtnFull: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#e5e7eb', paddingVertical: 16, borderRadius: 100, marginHorizontal: 16 },
+  withdrawBtnTextFull: { fontSize: 16, fontFamily: Fonts.medium, color: '#111827' },
+  actionCardSub: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280' },
+  actionCardModern: { backgroundColor: '#ffffff', borderRadius: 28, borderWidth: 1, borderColor: '#f3f4f6', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  actionCardInner: { flexDirection: 'row', alignItems: 'center', padding: 20 },
+  actionIconBox: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  actionCardTitle: { fontSize: 16, fontFamily: Fonts.bold, color: '#111827', marginBottom: 4 },
+
+  // New Impact Section
+  impactGridSection: { flexDirection: 'row', gap: 16 },
+  impactCardMini: { flex: 1, backgroundColor: '#fff', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: '#f3f4f6', alignItems: 'center' },
+  impactIconSmall: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  impactValSmall: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827' },
+  impactLabelSmall: { fontSize: 11, fontFamily: Fonts.medium, color: '#9ca3af', marginTop: 2 },
+
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 32, paddingBottom: 50 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  modalTitle: { fontSize: 20, fontFamily: Fonts.bold, color: '#111827' },
+  methodList: { gap: 16 },
+  methodItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9fafb', padding: 16, borderRadius: 20, gap: 16 },
+  methodIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  methodName: { fontSize: 16, fontFamily: Fonts.bold, color: '#111827' },
+  methodSub: { fontSize: 12, fontFamily: Fonts.medium, color: '#9ca3af', marginTop: 2 },
+  unreadBadge: { position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: '#10b981', borderWidth: 1.5, borderColor: '#fff' },
+
+  // Agent Daily Goal Styles
+  dailyGoalCard: { backgroundColor: '#111827', borderRadius: 24, padding: 20, marginTop: 12 },
+  goalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  goalTitle: { fontSize: 14, fontFamily: Fonts.bold, color: '#fff' },
+  goalProgressText: { fontSize: 12, fontFamily: Fonts.bold, color: '#10b981' },
+  goalTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 3, marginBottom: 12 },
+  goalFill: { height: '100%', backgroundColor: '#10b981', borderRadius: 3 },
+  goalSub: { fontSize: 11, fontFamily: Fonts.medium, color: 'rgba(255,255,255,0.6)' },
+
+  // Redesigned Agent Styles
+  agentPortalTextTitle: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827' },
+  onlineStatusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  onlineStatusText: { fontSize: 11, fontFamily: Fonts.bold, color: '#10b981', textTransform: 'uppercase' },
+  notifBtnTransparent: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  
+  earningsCardDesign: { backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  earningsHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  statLabelTopGrey: { fontSize: 11, fontFamily: Fonts.bold, color: '#9ca3af', letterSpacing: 0.5 },
+  trendBadgeGreen: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#dcfce7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12 },
+  trendBadgeText: { fontSize: 12, fontFamily: Fonts.bold, color: '#10b981' },
+  earningsValLarge: { fontSize: 44, fontFamily: Fonts.bold, color: '#059669', letterSpacing: -1.5 },
+  
+  targetProgressContainer: { marginTop: 24 },
+  targetLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  targetLabelText: { fontSize: 13, fontFamily: Fonts.bold, color: '#9ca3af' },
+  targetValueText: { fontSize: 13, fontFamily: Fonts.bold, color: '#059669' },
+  targetTrack: { height: 10, backgroundColor: '#f1f5f9', borderRadius: 5, overflow: 'hidden' },
+  targetFill: { height: '100%', backgroundColor: '#059669', borderRadius: 5 },
+  targetFooterText: { fontSize: 12, fontFamily: Fonts.medium, color: '#6b7280' },
+
+  statsRowGridDesign: { flexDirection: 'row', gap: 16, marginTop: 16 },
+  statCardFullDesign: { flex: 1, backgroundColor: '#fff', borderRadius: 32, padding: 24, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, borderWidth: 1, borderColor: '#f1f5f9' },
+  statIconBox: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'flex-start', marginBottom: 8 },
+  statLabelSmall: { fontSize: 13, fontFamily: Fonts.bold, color: '#9ca3af', letterSpacing: 0.5, marginTop: 8 },
+  statValueBig: { fontSize: 48, fontFamily: Fonts.bold, color: '#111827' },
+
+  quickActionsAgentSection: { paddingHorizontal: 24, marginBottom: 32 },
+  sectionHeadingTitle: { fontSize: 20, fontFamily: Fonts.bold, color: '#111827', letterSpacing: -0.5, marginBottom: 16 },
+  agentActionsGridDesign: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  agentActionItemDesign: { flex: 1, alignItems: 'center' },
+  actionIconCircleDesign: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  actionItemLabelDesign: { fontSize: 11, fontFamily: Fonts.bold, color: '#4b5563', textAlign: 'center' },
+
+  agentSectionActive: { paddingHorizontal: 24, marginBottom: 40 },
+  sectionSubHeading: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280', marginTop: -12, marginBottom: 20 },
+  emptyActiveCardDashed: { alignItems: 'center', justifyContent: 'center', padding: 40, borderStyle: 'dashed', borderWidth: 2, borderColor: '#e5e7eb', borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.5)' },
+  emptyIconCircleBlue: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  emptyActiveTitle: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827', textAlign: 'center' },
+  emptyActiveSub: { fontSize: 13, fontFamily: Fonts.medium, color: '#9ca3af', marginTop: 8, textAlign: 'center', lineHeight: 20 },
+  refreshQueueBtn: { backgroundColor: '#065f46', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 100, marginTop: 24 },
+  refreshQueueBtnText: { color: '#fff', fontSize: 14, fontFamily: Fonts.bold },
+  customMarker: { alignItems: 'center', justifyContent: 'center' },
 });

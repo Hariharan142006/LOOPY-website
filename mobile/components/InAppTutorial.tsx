@@ -11,6 +11,7 @@ import Animated, {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { LoopyColors } from '../constants/colors';
 import { Fonts } from '../constants/typography';
+import { useTranslation } from '../hooks/useTranslation';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export default function InAppTutorial({ isVisible, steps, onComplete }: Props) {
+  const { t } = useTranslation();
   const [currentStep, setCurrentStep] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const step = steps[currentStep];
@@ -51,10 +53,20 @@ export default function InAppTutorial({ isVisible, steps, onComplete }: Props) {
 
   useEffect(() => {
     if (isVisible && step && isReady) {
-      holeX.value = step.position.x - 10;
-      holeY.value = step.position.y - 10;
-      holeW.value = step.position.width + 20;
-      holeH.value = step.position.height + 20;
+      // Safety: If position is 0,0 (measurement failed), default to center of screen
+      const isInvalid = step.position.width === 0 || step.position.height === 0;
+      
+      if (isInvalid) {
+        holeX.value = SCREEN_WIDTH / 2 - 50;
+        holeY.value = SCREEN_HEIGHT / 2 - 50;
+        holeW.value = 100;
+        holeH.value = 100;
+      } else {
+        holeX.value = step.position.x - 10;
+        holeY.value = step.position.y - 10;
+        holeW.value = step.position.width + 20;
+        holeH.value = step.position.height + 20;
+      }
     }
   }, [currentStep, isVisible, isReady, step?.position]);
 
@@ -83,34 +95,44 @@ export default function InAppTutorial({ isVisible, steps, onComplete }: Props) {
   if (!isVisible || !step || !isReady) return null;
 
   // Calculate if tip should be above or below to avoid screen edges
-  const tipOnTop = step.tipPosition === 'top' || (step.position.y + step.position.height > SCREEN_HEIGHT - 250);
+  const targetY = step.position.y || SCREEN_HEIGHT / 2;
+  const targetH = step.position.height || 100;
+  const tipOnTop = step.tipPosition === 'top' || (targetY + targetH > SCREEN_HEIGHT - 280);
 
   return (
     <Modal transparent visible={isVisible} animationType="fade">
       <View style={styles.container}>
         <View style={styles.overlay}>
-           <View style={[styles.backdrop, { height: Math.max(0, step.position.y - 10), width: SCREEN_WIDTH }]} />
-           <View style={styles.holeRow}>
-              <View style={[styles.backdrop, { height: step.position.height + 20, width: Math.max(0, step.position.x - 10) }]} />
-              <View style={{ width: step.position.width + 20, height: step.position.height + 20 }} />
-              <View style={[styles.backdrop, { height: step.position.height + 20, width: Math.max(0, SCREEN_WIDTH - (step.position.x + step.position.width + 10)) }]} />
-           </View>
-           <View style={[styles.backdrop, { height: Math.max(0, SCREEN_HEIGHT - (step.position.y + step.position.height + 10)), width: SCREEN_WIDTH }]} />
+            <View style={[styles.backdrop, { height: Math.max(0, targetY - 10), width: SCREEN_WIDTH }]} />
+            <View style={styles.holeRow}>
+               <View style={[styles.backdrop, { height: targetH + 20, width: Math.max(0, step.position.x - 10) }]} />
+               <View style={{ width: step.position.width + 20, height: targetH + 20 }} />
+               <View style={[styles.backdrop, { height: targetH + 20, width: Math.max(0, SCREEN_WIDTH - (step.position.x + step.position.width + 10)) }]} />
+            </View>
+            <View style={[styles.backdrop, { height: Math.max(0, SCREEN_HEIGHT - (targetY + targetH + 10)), width: SCREEN_WIDTH }]} />
         </View>
 
         <Animated.View style={[styles.spotlight, animatedHoleStyle]} />
+
+        <TouchableOpacity 
+          style={styles.globalSkip} 
+          onPress={onComplete}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.globalSkipText}>{t('skip_tutorial' as any)}</Text>
+        </TouchableOpacity>
 
         <Animated.View 
           entering={FadeIn.duration(400)} 
           style={[
             styles.tipBox,
             tipOnTop 
-              ? { bottom: SCREEN_HEIGHT - step.position.y + 20 }
-              : { top: step.position.y + step.position.height + 30 }
+              ? { bottom: Math.min(SCREEN_HEIGHT - 100, SCREEN_HEIGHT - targetY + 20) }
+              : { top: Math.min(SCREEN_HEIGHT - 250, targetY + targetH + 30) }
           ]}
         >
            <View style={styles.tipHeader}>
-              <Text style={styles.stepCount}>Step {currentStep + 1} of {steps.length}</Text>
+              <Text style={styles.stepCount}>{t('step_indicator', { current: currentStep + 1, total: steps.length })}</Text>
               <TouchableOpacity onPress={onComplete}>
                  <Ionicons name="close" size={20} color="#9ca3af" />
               </TouchableOpacity>
@@ -123,17 +145,17 @@ export default function InAppTutorial({ isVisible, steps, onComplete }: Props) {
                 {currentStep > 0 && (
                   <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
                     <Ionicons name="arrow-back" size={16} color="#4b5563" />
-                    <Text style={styles.backBtnText}>Back</Text>
+                    <Text style={styles.backBtnText}>{t('back' as any)}</Text>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity style={styles.skipBtn} onPress={onComplete}>
-                   <Text style={styles.skipText}>Skip</Text>
+                   <Text style={styles.skipText}>{t('skip' as any)}</Text>
                 </TouchableOpacity>
               </View>
 
               <TouchableOpacity style={styles.nextBtn} onPress={handleNext}>
                  <Text style={styles.nextBtnText}>
-                    {currentStep === steps.length - 1 ? 'Finish' : 'Next'}
+                    {currentStep === steps.length - 1 ? t('finish' as any) : t('next' as any)}
                  </Text>
                  <Ionicons name="arrow-forward" size={16} color="#fff" style={{ marginLeft: 4 }} />
               </TouchableOpacity>
@@ -221,12 +243,15 @@ const styles = StyleSheet.create({
     color: '#4b5563',
   },
   skipBtn: {
-    padding: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
   },
   skipText: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: Fonts.bold,
-    color: '#9ca3af',
+    color: '#6b7280',
   },
   nextBtn: {
     backgroundColor: '#89c541',
@@ -240,5 +265,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontFamily: Fonts.bold,
+  },
+  globalSkip: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 100,
+    zIndex: 1000,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  globalSkipText: {
+    color: '#fff',
+    fontSize: 11,
+    fontFamily: Fonts.bold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });

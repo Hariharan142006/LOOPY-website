@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { cookies } from 'next/headers';
 import { signToken } from '@/lib/jwt';
 import { getAuthSession, isAdmin, isAgent } from '@/lib/auth';
+import { createNotification } from '@/lib/notifications';
 
 export async function loginAction(email: string, password: string): Promise<{ user: AuthUser | null; error?: string }> {
     try {
@@ -702,17 +703,41 @@ export async function assignAgentToBookingAction(bookingId: string, agentId: str
             select: { agentId: true, status: true }
         });
 
+        if (booking?.status !== 'PENDING' && booking?.agentId !== agentId) {
+            return { success: false, error: "This pickup is no longer available." };
+        }
+
         if (booking?.agentId && booking.agentId !== agentId) {
             return { success: false, error: "This pickup has already been accepted by another agent." };
         }
 
-        await db.booking.update({
+        const updatedBooking = await db.booking.update({
             where: { id: bookingId },
             data: {
                 agentId: agentId,
                 status: 'ASSIGNED' // Auto update status to ASSIGNED when agent is linked
-            }
+            },
+            select: { userId: true }
         });
+
+        // Notify Customer
+        await createNotification(
+            updatedBooking.userId,
+            'Agent Assigned',
+            'A professional agent has been assigned to your pickup request.',
+            'INFO',
+            bookingId
+        );
+
+        // Notify Agent
+        await createNotification(
+            agentId,
+            'New Task Assigned',
+            'You have a new pickup task assigned to you.',
+            'SUCCESS',
+            bookingId
+        );
+
         return { success: true };
     } catch (error) {
         console.error("Assign Agent Error:", error);
@@ -727,6 +752,32 @@ export async function updateBookingStatusAction(bookingId: string, status: strin
             where: { id: bookingId },
             data: { status }
         });
+
+        // Fetch booking to get userId for notification
+        const booking = await db.booking.findUnique({ where: { id: bookingId }, select: { userId: true } });
+        if (booking) {
+            let title = '';
+            let msg = '';
+            let type: any = 'INFO';
+
+            if (status === 'ONEWAY') {
+                title = 'Agent on the way';
+                msg = 'Your agent has started the trip and is heading to your location.';
+            } else if (status === 'ARRIVED') {
+                title = 'Agent Arrived';
+                msg = 'Your agent has arrived at your location.';
+                type = 'SUCCESS';
+            } else if (status === 'COMPLETED' || status === 'PAID') {
+                title = 'Pickup Completed';
+                msg = 'Thank you for recycling with Loopy! Your pickup is complete.';
+                type = 'SUCCESS';
+            }
+
+            if (title) {
+                await createNotification(booking.userId, title, msg, type, bookingId);
+            }
+        }
+
         return { success: true };
     } catch (error) {
         console.error("Update Status Error:", error);
@@ -826,7 +877,7 @@ export async function findNearestAgent(lat: number, lng: number, maxDistanceKm: 
     }
 }
 
-export async function getAgentTasksAction(agentId: string, agentLat?: number, agentLng?: number) {
+export async function getAgentTasksAction(agentId: string, agentLat?: number, agentLng?: number, date?: string) {
     const session = await getAuthSession();
     if (!session || (session.role !== 'ADMIN' && session.id !== agentId)) {
         return { available: [], accepted: [], completed: [] };
@@ -839,68 +890,75 @@ export async function getAgentTasksAction(agentId: string, agentLat?: number, ag
 
         auditLog(`Call: agentId="${agentId}" lat=${agentLat} lng=${agentLng}`);
         
-        const bookings = await db.booking.findMany({
+        // 1. Fetch Accepted Tasks (Highest Priority)
+        const acceptedRaw = await db.booking.findMany({
             where: {
-                OR: [
-                    { agentId: agentId },
-                    { status: 'PENDING' }
-                ]
+                agentId: agentId,
+                status: { notIn: ['COMPLETED', 'CANCELLED'] }
             },
             include: {
-                user: true,
+                user: { select: { id: true, name: true, phone: true, image: true } },
                 address: true,
-                items: {
-                    include: {
-                        item: {
-                            include: {
-                                category: true
-                            }
-                        }
-                    }
-                }
+                items: { include: { item: true } }
             },
-            orderBy: {
-                createdAt: 'desc'
-            }
+            orderBy: { updatedAt: 'desc' }
         });
 
-        // Haversine distance calculation is already used in calculateDistance helper
+        // 2. Fetch Available Tasks (PENDING) - Recently created or nearby
+        // We'll limit this to the 20 most recent pending tasks to save memory/bandwidth
+        const availableRaw = await db.booking.findMany({
+            where: {
+                status: 'PENDING',
+                agentId: null
+            },
+            take: 20,
+            include: {
+                user: { select: { id: true, name: true } },
+                address: true,
+                items: { include: { item: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
 
-        // Add distance to each booking
-        const bookingsWithDistance = bookings.map(b => {
+        // 3. Fetch Today's Stats (Completed Tasks count and earnings)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const todayCompletedStats = await db.booking.aggregate({
+            where: {
+                agentId: agentId,
+                status: 'COMPLETED',
+                updatedAt: { gte: today }
+            },
+            _sum: { totalAmount: true },
+            _count: { id: true }
+        });
+
+        const todayEarnings = todayCompletedStats._sum.totalAmount || 0;
+        const todayCompletedCount = todayCompletedStats._count.id || 0;
+
+        // 4. Processing Distance & Optimization
+        const available = availableRaw.map(b => {
             let distance = 0;
             if (agentLat && agentLng && b.pickupLat && b.pickupLng) {
                 distance = calculateDistance(agentLat, agentLng, b.pickupLat, b.pickupLng);
             }
-            return { ...b, distance };
+            const estimatedValue = b.items.reduce((acc, curr) => acc + (curr.quantity * curr.priceAtBooking), 0);
+            return { ...b, distance, estimatedValue };
+        }).sort((a, b) => a.distance - b.distance);
+
+        const acceptedWithDistance = acceptedRaw.map(b => {
+            let distance = 0;
+            if (agentLat && agentLng && b.pickupLat && b.pickupLng) {
+                distance = calculateDistance(agentLat, agentLng, b.pickupLat, b.pickupLng);
+            }
+            const estimatedValue = b.items.reduce((acc, curr) => acc + (curr.quantity * curr.priceAtBooking), 0);
+            return { ...b, distance, estimatedValue };
         });
-
-        auditLog(`Total bookings fetched: ${bookings.length}`);
-
-        // 1. Available: PENDING status AND no agent assigned
-        const available = bookingsWithDistance.filter(b =>
-            b.status === 'PENDING' &&
-            (!b.agentId || String(b.agentId).trim() === "" || b.agentId === null)
-        );
-
-        // 2. Accepted: Assigned to THIS agent AND status is NOT COMPLETED or CANCELLED
-        const acceptedRaw = bookingsWithDistance.filter(b => {
-            const isMatch = b.agentId && String(b.agentId) === String(agentId);
-            const isNotFinal = !['COMPLETED', 'CANCELLED'].includes(b.status);
-            return isMatch && isNotFinal;
-        });
-
-        auditLog(`Found ${available.length} available, ${acceptedRaw.length} accepted_raw`);
-
-        // 3. Completed: Assigned to THIS agent AND status is COMPLETED
-        const completed = bookingsWithDistance.filter(b =>
-            b.agentId && String(b.agentId) === String(agentId) &&
-            b.status === 'COMPLETED'
-        );
 
         // Route Optimization for Accepted Tasks (Nearest Neighbor)
         const optimizedAccepted = [];
-        let remainingAccepted = [...acceptedRaw];
+        let remainingAccepted = [...acceptedWithDistance];
         let currentLat = agentLat;
         let currentLng = agentLng;
 
@@ -927,24 +985,40 @@ export async function getAgentTasksAction(agentId: string, agentLat?: number, ag
             currentLng = nearest.pickupLng;
         }
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const todayCompleted = completed.filter(b => b.updatedAt >= today);
-        const todayEarnings = todayCompleted.reduce((acc, b) => acc + (b.totalAmount || 0), 0);
-
-        console.log(`[FORENSIC] Result for ${agentId}: ${available.length} avail, ${optimizedAccepted.length} acc, ${completed.length} comp, Today Earnings: ${todayEarnings}`);
-
         const agent = await db.user.findUnique({ where: { id: agentId }, select: { isOnline: true } });
 
+        // 5. Fetch Completed Tasks (Optional: filtered by date)
+        let completed: any[] = [];
+        if (date) {
+            const filterDate = new Date(date);
+            const nextDate = new Date(date);
+            nextDate.setDate(nextDate.getDate() + 1);
+            
+            completed = await db.booking.findMany({
+                where: {
+                    agentId: agentId,
+                    status: 'COMPLETED',
+                    updatedAt: {
+                        gte: filterDate,
+                        lt: nextDate
+                    }
+                },
+                include: {
+                    user: { select: { id: true, name: true } },
+                    address: true
+                },
+                orderBy: { updatedAt: 'desc' }
+            });
+        }
+
         return {
-            available: available.sort((a, b) => a.distance - b.distance),
+            available: available,
             accepted: optimizedAccepted,
             completed: completed,
             isOnline: agent?.isOnline ?? false,
             summary: {
                 todayEarnings,
-                todayCompleted: todayCompleted.length,
+                todayCompleted: todayCompletedCount,
                 assignedCount: optimizedAccepted.length
             }
         };
@@ -1112,6 +1186,15 @@ export async function createBookingAction(userId: string, data: { items: { id: s
 
 
         }
+        
+        // Notify Customer about successful booking
+        await createNotification(
+            userId,
+            'Booking Successful',
+            `Your pickup request has been received for ${data.schedule.date} at ${data.schedule.time}.`,
+            'SUCCESS',
+            booking.id
+        );
 
         return { success: true, bookingId: booking.id };
     } catch (error) {
@@ -1163,10 +1246,21 @@ export async function cancelBookingAction(bookingId: string): Promise<{ success:
             const booking = await db.booking.findUnique({ where: { id: bookingId }, select: { userId: true } });
             if (booking?.userId !== session.id) return { success: false, error: "Unauthorized" };
         }
-        await db.booking.update({
+        const booking = await db.booking.update({
             where: { id: bookingId },
-            data: { status: 'CANCELLED' }
+            data: { status: 'CANCELLED' },
+            select: { agentId: true, userId: true }
         });
+
+        if (booking.agentId) {
+            await createNotification(
+                booking.agentId,
+                'Pickup Cancelled',
+                'A pickup task assigned to you has been cancelled by the customer.',
+                'WARNING',
+                bookingId
+            );
+        }
         return { success: true };
     } catch (error) {
         console.error("Cancel Booking Error:", error);
@@ -1656,6 +1750,23 @@ export async function payBookingAction(bookingId: string, data: { items: any[], 
 
         if (!booking) return { success: false, error: "Booking not found" };
         if (booking.status === 'COMPLETED' || booking.status === 'PAID') return { success: false, error: "Already completed" };
+
+        // --- NEW VALIDATION ---
+        let scannedUserId = data.customerWalletId;
+        try {
+            // Check if it's the JSON format from the mobile app
+            const parsed = JSON.parse(data.customerWalletId);
+            if (parsed.userId) scannedUserId = parsed.userId;
+        } catch (e) {
+            // If not JSON, assume it's a raw ID (backward compatibility or direct scan)
+            scannedUserId = data.customerWalletId;
+        }
+
+        if (scannedUserId !== booking.userId) {
+            console.warn(`[PAY] Validation failed for booking ${bookingId}: Scanned ${scannedUserId} != Expected ${booking.userId}`);
+            return { success: false, error: "Incorrect Customer Wallet Scanned. Please scan the QR code from this customer's Loopy app." };
+        }
+        // ----------------------
 
         // Validate items
         if (!data.items || data.items.length === 0) {

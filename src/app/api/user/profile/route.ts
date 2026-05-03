@@ -23,7 +23,8 @@ export async function GET(request: Request) {
                 appNotificationsEnabled: true,
                 preferredLanguage: true,
                 onboarded: true,
-                image: true
+                image: true,
+                assignedVehicles: true
             }
         });
 
@@ -47,7 +48,10 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json();
-        const { name, email, phone, image, onboarded, preferredLanguage } = body;
+        const { 
+            name, email, phone, image, onboarded, preferredLanguage,
+            vehicleName, vehiclePlate, vehicleType, capacityKg
+        } = body;
         console.log("Profile Update Attempt for user:", session.id, "Body:", body);
 
         const updateData: any = {};
@@ -57,24 +61,52 @@ export async function POST(request: Request) {
         if (image !== undefined) updateData.image = image;
         if (onboarded !== undefined) updateData.onboarded = onboarded;
         if (preferredLanguage !== undefined) updateData.preferredLanguage = preferredLanguage;
+        if (vehicleType !== undefined) updateData.vehicleType = vehicleType;
 
-        const updatedUser = await db.user.update({
-            where: { id: session.id },
-            data: updateData,
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                role: true,
-                phone: true,
-                image: true,
-                onboarded: true,
-                preferredLanguage: true
+        // Start a transaction to update user and handle fleet if needed
+        const result = await db.$transaction(async (tx) => {
+            const user = await tx.user.update({
+                where: { id: session.id },
+                data: updateData,
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    role: true,
+                    phone: true,
+                    image: true,
+                    onboarded: true,
+                    preferredLanguage: true
+                }
+            });
+
+            // If vehicle details are provided and user is an agent, handle FleetVehicle
+            if (user.role === 'AGENT' && vehiclePlate && vehicleName) {
+                await tx.fleetVehicle.upsert({
+                    where: { licensePlate: vehiclePlate },
+                    update: {
+                        name: vehicleName,
+                        vehicleType: vehicleType || 'Bicycle',
+                        capacityKg: capacityKg ? Number(capacityKg) : undefined,
+                        agentId: user.id,
+                        status: 'ACTIVE'
+                    },
+                    create: {
+                        name: vehicleName,
+                        licensePlate: vehiclePlate,
+                        vehicleType: vehicleType || 'Bicycle',
+                        capacityKg: capacityKg ? Number(capacityKg) : 0,
+                        agentId: user.id,
+                        status: 'ACTIVE'
+                    }
+                });
             }
+
+            return user;
         });
 
         console.log("Profile Update Success");
-        return NextResponse.json({ success: true, user: updatedUser });
+        return NextResponse.json({ success: true, user: result });
     } catch (error: any) {
         console.error("Profile Update API Error Details:", error);
         

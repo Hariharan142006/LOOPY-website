@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, ScrollView, StatusBar, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, ScrollView, StatusBar, Image, Dimensions, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
 import { useAuth } from '../../context/AuthContext';
@@ -20,15 +20,20 @@ export default function BookingsScreen() {
   const navigation = useNavigation<any>();
   
   const [bookings, setBookings] = useState<any[]>([]);
+  const [impact, setImpact] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchBookings = async () => {
+  const fetchData = async () => {
     try {
-      const response = await api.get('/api/user/bookings');
-      setBookings(response.data.bookings || []);
+      const [bookingsRes, walletRes] = await Promise.all([
+        api.get('/api/user/bookings'),
+        api.get('/api/user/wallet')
+      ]);
+      setBookings(bookingsRes.data.bookings || []);
+      setImpact(walletRes.data.impact || null);
     } catch (error) {
-      console.log('Error fetching bookings', error);
+      console.log('Error fetching bookings/impact', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -36,118 +41,87 @@ export default function BookingsScreen() {
   };
 
   useEffect(() => {
-    fetchBookings();
+    fetchData();
   }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchBookings();
+    fetchData();
   };
 
   const renderTimelineItem = ({ item, index }: { item: any; index: number }) => {
-    const status = item.status?.toUpperCase();
+    const status = item.status?.toUpperCase() || 'PENDING';
     const isCompleted = status === 'COMPLETED' || status === 'PAID';
-    const isActive = status === 'PENDING' || status === 'ASSIGNED' || status === 'ONEWAY' || status === 'ARRIVED';
+    const isCancelled = status === 'CANCELLED';
     
-    const getStatusColor = () => {
-      switch (status) {
-        case 'PENDING': return '#f59e0b'; // Amber
-        case 'ASSIGNED': return '#3b82f6'; // Blue
-        case 'ONEWAY': return '#10b981'; // Green
-        case 'ARRIVED': return '#8b5cf6'; // Purple
-        case 'COMPLETED':
-        case 'PAID': return '#22c55e'; // Success Green
-        case 'CANCELLED': return '#ef4444'; // Red
-        default: return '#9ca3af'; // Grey
-      }
+    const getStatusTheme = () => {
+       if (isCompleted) return { bg: '#eafff2', text: '#16a34a' };
+       if (isCancelled) return { bg: '#ffe4e6', text: '#ef4444' };
+       return { bg: '#f1f5f9', text: '#64748b' };
     };
+    const theme = getStatusTheme();
 
-    const statusColor = getStatusColor();
-    
     return (
-      <View style={styles.timelineRow}>
-        <View style={styles.timelineLeft}>
-          <View style={[styles.timelineLine, index === bookings.length - 1 && { height: '50%' }]} />
-          <View style={[
-            styles.timelineDot, 
-            isActive && { backgroundColor: statusColor + '20', borderColor: statusColor, borderWidth: 2 },
-            isCompleted && { backgroundColor: statusColor }
-          ]}>
-             {isActive && <View style={[styles.dotInner, { backgroundColor: statusColor }]} />}
-          </View>
-        </View>
+       <Animated.View entering={FadeInRight.delay(index * 100)} style={styles.cardContainer}>
+         <TouchableOpacity 
+           activeOpacity={0.7}
+           onPress={() => navigation.navigate('Track', { id: item.id } as any)}
+           style={styles.bookingCard}
+         >
+           <View style={styles.cardHeaderRow}>
+             <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+                <Text style={styles.cardIdText}>#{item.id.slice(0,8).toUpperCase()}</Text>
+                <View style={[styles.statusPill, { backgroundColor: theme.bg }]}>
+                   <Text style={[styles.statusPillText, { color: theme.text }]}>{status}</Text>
+                </View>
+             </View>
+             <View style={{alignItems: 'flex-end'}}>
+                <Text style={styles.cardAmount}>₹{item.totalAmount > 0 ? item.totalAmount.toFixed(2) : '--'}</Text>
+                <Text style={styles.cardAmountSub}>{isCompleted ? 'FINAL PAYOUT' : 'ESTIMATED VALUE'}</Text>
+             </View>
+           </View>
+           
+           <Text style={styles.cardDateText}>{new Date(item.createdAt).toLocaleDateString('en-GB', {day: '2-digit', month: 'short', year: 'numeric'})} • {new Date(item.createdAt).toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'})}</Text>
 
-        <Animated.View 
-          entering={FadeInRight.delay(index * 100)} 
-          style={styles.cardContainer}
-        >
-          <TouchableOpacity 
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('Track', { id: item.id } as any)}
-            style={[
-              styles.bookingCard, 
-              isActive && { backgroundColor: statusColor + '08', borderColor: statusColor + '40' }
-            ]}
-          >
-            <View style={styles.cardHeaderSmall}>
-               <Text style={[styles.statusLabel, { color: statusColor }]}>
-                 {t(`status.${status.toLowerCase()}`)} • {new Date(item.scheduledAt).toLocaleDateString()}
-               </Text>
-               <Ionicons 
-                 name={isCompleted ? "checkmark-circle" : (status === 'PENDING' ? "time" : "navigate")} 
-                 size={16} 
-                 color={statusColor} 
-               />
-            </View>
+           <View style={styles.itemsRow}>
+              {(item.items && item.items.length > 0) ? (
+                <>
+                  {item.items.slice(0, 2).map((sub: any, idx: number) => (
+                    <View key={idx} style={styles.itemTag}>
+                      <Text style={styles.itemTagText}>{sub.type || sub.category || 'Material'}</Text>
+                    </View>
+                  ))}
+                  {item.items.length > 2 && (
+                    <View style={styles.itemTag}>
+                      <Text style={styles.itemTagText}>+{item.items.length - 2} more</Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={styles.itemTag}>
+                  <Text style={styles.itemTagText}>{(item.estimatedWeight || item.weightRange?.label || '20kg') + ' Recyclables'}</Text>
+                </View>
+              )}
+           </View>
 
-            <Text style={styles.cardTitle}>{item.id.slice(-6).toUpperCase()} {t('pickup')}</Text>
-            <Text style={styles.cardDesc}>{item.address?.street}, {item.address?.city}</Text>
-            
-            <View style={styles.cardFooter}>
-               <View style={styles.materialTag}>
-                  <Ionicons name="leaf" size={12} color={isActive ? statusColor : '#6b7280'} />
-                  <Text style={[styles.materialText, isActive && { color: statusColor }]}>{t('recyclables')}</Text>
-               </View>
-               {isCompleted && item.totalAmount > 0 && (
-                  <View style={styles.creditsBadge}>
-                     <Text style={styles.creditsText}>+₹{item.totalAmount.toFixed(0)} Credits</Text>
-                  </View>
-               )}
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
+           <View style={styles.agentRow}>
+              <View style={styles.agentIconBg}>
+                 <Ionicons name="bus" size={20} color={LoopyColors.green} />
+              </View>
+              <View style={{flex: 1, marginLeft: 12}}>
+                 <Text style={styles.agentName}>{item.agent?.name ? `Agent ${item.agent.name.split(' ')[0]}` : 'Assigning Agent'}</Text>
+                 <Text style={styles.agentRole}>{item.agent ? 'Pickup Professional' : 'Looking for nearby riders...'}</Text>
+              </View>
+              {item.agent?.phone && (
+                <TouchableOpacity style={styles.callBtn} onPress={() => Linking.openURL(`tel:${item.agent.phone}`)}>
+                   <Text style={styles.callBtnText}>Call Agent</Text>
+                </TouchableOpacity>
+              )}
+           </View>
+         </TouchableOpacity>
+       </Animated.View>
     );
   };
-
-  const ListHeader = () => (
-    <Animated.View entering={FadeInUp} style={styles.impactCardContainer}>
-      <View style={styles.impactCard}>
-        <View style={styles.impactCardRow}>
-          <View>
-            <Text style={styles.impactLabel}>{t('total_savings')}</Text>
-            <Text style={styles.impactValue}>124.8 KG</Text>
-          </View>
-          <View style={styles.growthBadge}>
-             <Text style={styles.growthText}>+12% this month</Text>
-          </View>
-        </View>
-        
-        <View style={styles.subStatsRow}>
-           <View style={styles.subStatCard}>
-              <View style={styles.subStatIcon}><Ionicons name="sync" size={14} color="#16a34a" /></View>
-              <Text style={styles.subStatLabel}>{t('plastic_diverted')}</Text>
-              <Text style={styles.subStatVal}>82.3 kg</Text>
-           </View>
-           <View style={styles.subStatCard}>
-              <View style={styles.subStatIcon}><Ionicons name="leaf" size={14} color="#16a34a" /></View>
-              <Text style={styles.subStatLabel}>{t('co2_offset')}</Text>
-              <Text style={styles.subStatVal}>42.5 kg</Text>
-           </View>
-        </View>
-      </View>
-    </Animated.View>
-  );
 
   if (loading) {
     return (
@@ -162,37 +136,36 @@ export default function BookingsScreen() {
       <StatusBar barStyle="dark-content" />
       
       <View style={styles.header}>
-        <View style={{ width: 40 }} />
-        <Text style={styles.headerTitle}>{t('bookings')}</Text>
-        <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('Main', { screen: 'profile' })}>
-           <Image 
-              source={user?.image ? { uri: user.image } : require('../../assets/images/user-placeholder.png')} 
-              style={styles.avatarMini} 
-           />
-        </TouchableOpacity>
+        <Text style={styles.loopyLogoText}>Loopy</Text>
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10}}>
+           <View style={{ flexShrink: 1, paddingRight: 16 }}>
+             <Text style={styles.headerTitle}>My Bookings</Text>
+             <Text style={styles.headerSub}>Track current pickups and view past history</Text>
+           </View>
+           <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('Main', { screen: 'profile' })}>
+             <Image 
+                source={user?.image ? { uri: user.image } : require('../../assets/images/user-placeholder.png')} 
+                style={styles.avatarMini} 
+             />
+           </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
         data={bookings}
         renderItem={renderTimelineItem}
         keyExtractor={(item) => item.id}
-        ListHeaderComponent={ListHeader}
-        ListFooterComponent={() => (
+        ListHeaderComponent={() => <View style={{height: 16}} />}
+        ListFooterComponent={() => bookings.length > 0 ? (
           <TouchableOpacity style={styles.loadMoreBtn}>
              <Text style={styles.loadMoreText}>{t('load_more')}</Text>
           </TouchableOpacity>
-        )}
-        contentContainerStyle={styles.listContent}
+        ) : null}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 200 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={LoopyColors.green} />}
         showsVerticalScrollIndicator={false}
       />
 
-      <TouchableOpacity 
-        style={styles.fab}
-        onPress={() => navigation.navigate('Book')}
-      >
-        <Ionicons name="add" size={32} color="#fff" />
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -202,60 +175,40 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   
   // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 12 },
-  headerTitle: { fontSize: 18, fontFamily: Fonts.bold, color: '#111827' },
-  profileBtn: { width: 40, height: 40, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#e5e7eb' },
+  header: { paddingHorizontal: 24, paddingVertical: 16, paddingTop: 24 },
+  loopyLogoText: { fontSize: 24, fontWeight: '900', color: '#16a34a' },
+  headerTitle: { fontSize: 28, fontFamily: Fonts.bold, color: '#111827', letterSpacing: -0.5 },
+  headerSub: { fontSize: 13, color: '#6b7280', marginTop: 4, fontFamily: Fonts.medium },
+  profileBtn: { width: 48, height: 48, borderRadius: 24, overflow: 'hidden', backgroundColor: '#fecdd3', alignItems: 'center', justifyContent: 'center' },
   avatarMini: { width: '100%', height: '100%' },
 
-  // Impact Card
-  impactCardContainer: { padding: 24, paddingBottom: 12 },
-  impactCard: { 
-    backgroundColor: '#fff', 
-    borderRadius: 32, 
-    padding: 24,
-    shadowColor: '#10b981',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 8 
-  },
-  impactCardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
-  impactLabel: { fontSize: 10, fontFamily: Fonts.bold, color: '#059669', letterSpacing: 1 },
-  impactValue: { fontSize: 32, fontFamily: Fonts.bold, color: '#111827', marginTop: 4 },
-  growthBadge: { backgroundColor: '#bbf7d0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100 },
-  growthText: { color: '#166534', fontSize: 10, fontFamily: Fonts.bold },
-  subStatsRow: { flexDirection: 'row', gap: 12 },
-  subStatCard: { flex: 1, backgroundColor: '#f9fafb', borderRadius: 20, padding: 16 },
-  subStatIcon: { marginBottom: 8 },
-  subStatLabel: { fontSize: 10, fontFamily: Fonts.medium, color: '#6b7280', marginBottom: 2 },
-  subStatVal: { fontSize: 14, fontFamily: Fonts.bold, color: '#111827' },
-
-  // Timeline
-  listContent: { paddingBottom: 100 },
-  timelineRow: { flexDirection: 'row', paddingHorizontal: 24, marginBottom: 4 },
-  timelineLeft: { width: 30, alignItems: 'center' },
-  timelineLine: { position: 'absolute', top: 0, bottom: -10, width: 2, backgroundColor: '#e5e7eb' },
-  timelineDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#9ca3af', marginTop: 28, zIndex: 1, borderWidth: 3, borderColor: '#fcfcfc' },
-  timelineDotActive: { backgroundColor: '#bbf7d0', width: 24, height: 24, borderRadius: 12, marginTop: 23, marginLeft: -5 },
-  dotInner: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#22c55e' },
+  listContent: { paddingBottom: 100, paddingHorizontal: 24 },
   
   // Cards
-  cardContainer: { flex: 1 },
-  bookingCard: { flex: 1, backgroundColor: '#fff', borderRadius: 24, padding: 20, marginLeft: 16, marginBottom: 20, borderWidth: 1, borderColor: '#f3f4f6' },
-  scheduledCard: { backgroundColor: '#f0fdf4', borderColor: '#dcfce7' },
-  cardHeaderSmall: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  statusLabel: { fontSize: 9, fontFamily: Fonts.bold, letterSpacing: 0.5, textTransform: 'uppercase' },
-  cardTitle: { fontSize: 16, fontFamily: Fonts.bold, color: '#111827', marginBottom: 4 },
-  cardDesc: { fontSize: 13, fontFamily: Fonts.medium, color: '#6b7280', lineHeight: 18 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
-  materialTag: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f3f4f6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  scheduledMaterialTag: { backgroundColor: '#dcfce7' },
-  materialText: { fontSize: 11, fontFamily: Fonts.bold, color: '#111827' },
-  creditsBadge: { backgroundColor: '#ecfdf5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  creditsText: { fontSize: 11, fontFamily: Fonts.bold, color: '#059669' },
+  cardContainer: { marginBottom: 16 },
+  bookingCard: { backgroundColor: '#fff', borderRadius: 28, padding: 20, borderWidth: 1, borderColor: '#f3f4f6', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 4 },
+  
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  cardIdText: { fontSize: 16, fontWeight: '800', color: '#111827' },
+  statusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusPillText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  cardAmount: { fontSize: 20, fontWeight: '800', color: '#111827', textAlign: 'right' },
+  cardAmountSub: { fontSize: 9, fontWeight: '800', color: '#6b7280', letterSpacing: 0.5, textAlign: 'right', marginTop: 2 },
+  
+  cardDateText: { fontSize: 13, color: '#6b7280', fontWeight: '500', marginBottom: 20 },
+  
+  itemsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 24 },
+  itemTag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },
+  itemTagText: { fontSize: 12, fontWeight: '600', color: '#475569' },
+  
+  agentRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', padding: 12, borderRadius: 20 },
+  agentIconBg: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#eafff2', alignItems: 'center', justifyContent: 'center' },
+  agentName: { fontSize: 14, fontWeight: '800', color: '#111827' },
+  agentRole: { fontSize: 11, fontWeight: '500', color: '#64748b' },
+  callBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 100, borderWidth: 1, borderColor: '#16a34a', backgroundColor: '#fff' },
+  callBtnText: { fontSize: 13, fontWeight: '800', color: '#16a34a' },
 
   // Footer & FAB
-  loadMoreBtn: { marginHorizontal: 24, marginVertical: 12, paddingVertical: 14, borderRadius: 20, backgroundColor: '#f3f4f6', alignItems: 'center' },
+  loadMoreBtn: { marginVertical: 12, paddingVertical: 14, borderRadius: 20, backgroundColor: '#f3f4f6', alignItems: 'center' },
   loadMoreText: { fontSize: 13, fontFamily: Fonts.bold, color: '#6b7280' },
-  fab: { position: 'absolute', bottom: 100, right: 24, width: 60, height: 60, borderRadius: 30, backgroundColor: '#15803d', alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 },
 });

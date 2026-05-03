@@ -22,6 +22,9 @@ import ManageAddressesScreen from './manage-addresses';
 import FeedbackScreen from './feedback';
 import ReferEarnScreen from './refer-earn';
 import LanguageNotificationsScreen from './language-notifications';
+import TermsScreen from './terms';
+import LicensesScreen from './licenses';
+import WithdrawScreen from './withdraw';
 
 // Dynamic Screens
 import InvoiceScreen from './invoice/[id]';
@@ -55,12 +58,11 @@ function RootLayoutNav() {
         <>
           {!user?.onboarded ? (
             <>
-              <Stack.Screen name="OnboardingLanguage" component={OnboardingLanguageScreen} />
               <Stack.Screen name="OnboardingDetails" component={OnboardingDetailsScreen} />
+              <Stack.Screen name="OnboardingLanguage" component={OnboardingLanguageScreen} />
               {user?.role === 'AGENT' && (
                 <Stack.Screen name="OnboardingFleet" component={OnboardingFleetScreen} />
               )}
-              <Stack.Screen name="OnboardingTutorial" component={OnboardingTutorialScreen} />
             </>
           ) : null}
           <Stack.Screen name="Main" component={TabLayout} />
@@ -80,6 +82,9 @@ function RootLayoutNav() {
           <Stack.Screen name="Track" component={TrackScreen} />
           <Stack.Screen name="TrackRoute" component={TrackRouteScreen} />
           <Stack.Screen name="Weigh" component={WeighScreen} />
+          <Stack.Screen name="Terms" component={TermsScreen} />
+          <Stack.Screen name="Licenses" component={LicensesScreen} />
+          <Stack.Screen name="Withdraw" component={WithdrawScreen} />
         </>
       )}
     </Stack.Navigator>

@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: Fonts.bold,
     color: '#111827',
   },
   scroll: {
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 40,
-    fontWeight: 'bold',
+    fontFamily: Fonts.bold,
     color: '#fff',
   },
   avatarImage: {
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
   },
   changeText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Fonts.semiBold,
     color: '#10b981',
   },
   form: {
@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: Fonts.bold,
     color: '#374151',
   },
   input: {
@@ -242,6 +242,7 @@ const styles = StyleSheet.create({
     height: 48,
     fontSize: 16,
     color: '#111827',
+    fontFamily: Fonts.medium,
   },
   inputDisabled: {
     backgroundColor: '#f3f4f6',
@@ -249,6 +250,7 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
+    fontFamily: Fonts.regular,
     color: '#9ca3af',
     marginTop: 2,
   },
@@ -265,6 +267,6 @@ const styles = StyleSheet.create({
   submitText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
-  }
+    fontFamily: Fonts.bold,
+  },
 });

@@ -21,7 +21,15 @@ export async function GET(
                     select: { id: true, name: true, phone: true, email: true }
                 },
                 agent: {
-                    select: { id: true, name: true, phone: true, currentLat: true, currentLng: true, vehicleType: true }
+                    select: { 
+                        id: true, 
+                        name: true, 
+                        phone: true, 
+                        currentLat: true, 
+                        currentLng: true, 
+                        vehicleType: true,
+                        assignedVehicles: true
+                    }
                 },
                 address: true,
                 items: {

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthSession } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(req: Request) {
     try {
         const session = await getAuthSession();
 
@@ -10,13 +10,28 @@ export async function GET() {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
+        const { searchParams } = new URL(req.url);
+        const limit = parseInt(searchParams.get('limit') || '10');
+        const skip = parseInt(searchParams.get('skip') || '0');
+
         const bookings = await db.booking.findMany({
             where: {
                 userId: session.id
             },
+            take: limit,
+            skip: skip,
             include: {
                 address: true,
+                agent: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        assignedVehicles: true
+                    }
+                },
                 items: {
+                    take: 3, // Only need a preview for the list
                     include: {
                         item: true
                     }

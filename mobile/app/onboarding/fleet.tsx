@@ -35,8 +35,8 @@ export default function FleetDetailsScreen() {
       });
 
       if (response.data.success) {
-        await updateUser({ vehicleType });
-        navigation.navigate('OnboardingTutorial');
+        await api.post('/api/user/profile', { onboarded: true });
+        await updateUser({ vehicleType, onboarded: true });
       }
     } catch (error: any) {
       const message = error.response?.data?.error || 'Failed to save vehicle details';
@@ -57,7 +57,6 @@ export default function FleetDetailsScreen() {
             <View style={styles.stepDotActive} />
             <View style={styles.stepDotActive} />
             <View style={[styles.stepDot, styles.stepDotActive]} />
-            <View style={styles.stepDot} />
           </View>
           <Text style={styles.title}>Vehicle Details</Text>
           <Text style={styles.subtitle}>Register your vehicle to start receiving pickup requests</Text>
